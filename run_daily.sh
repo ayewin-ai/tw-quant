@@ -13,18 +13,24 @@ if [[ -z "${1:-}" && "$TWHOUR" -lt 15 ]]; then
   echo "提醒：台灣時間尚未 15:00，當日收盤資料可能還沒公布。"
 fi
 
-echo "--- [1/4] 更新資料"
+echo "--- [1/5] 更新資料"
 $PY -m twq update --end "$TWDATE" --days 10 || echo "更新發生錯誤（繼續執行，可能使用舊資料）"
 
-echo "--- [2/4] 檢討尚未檢討、且目標日已有資料的預測"
+echo "--- [2/5] 檢討尚未檢討、且目標日已有資料的預測"
 $PY -m twq review --no-update || echo "檢討失敗"
 
-echo "--- [3/4] 預測下一交易日"
+echo "--- [3/5] 預測下一交易日"
 if $PY -m twq has-data --date "$TWDATE"; then
   $PY -m twq predict --date "$TWDATE" --no-update
 else
   echo "${TWDATE} 沒有交易資料（休市日、颱風假或資料尚未公布），略過預測。"
 fi
-echo "--- [4/4] 更新網站資料 docs/"
+echo "--- [4/5] 更新網站資料 docs/"
 $PY -m twq site || echo "網站資料產生失敗"
+echo "--- [5/5] 推送網站更新到 GitHub"
+if [[ -n "$(git status --porcelain docs reports models/validation.json)" ]]; then
+  git add docs reports models/validation.json && git commit -q -m "daily update ${TWDATE}" && git push -q origin main && echo "已推送" || echo "推送失敗"
+else
+  echo "沒有變更，不推送"
+fi
 echo "完成 $(date '+%F %T %Z')"
