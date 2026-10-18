@@ -1,0 +1,17 @@
+:root{--bg:#0f1419;--fg:#e6e6e6;--mut:#9aa5b1;--card:#18202a;--acc:#4fa3ff;--red:#ff6b6b;--grn:#3ddc97;--yel:#ffd166}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif}
+header{padding:28px 20px 10px;max-width:1100px;margin:auto}h1{margin:0;font-size:28px}.sub{color:var(--mut);margin:4px 0 12px}
+nav{display:flex;flex-wrap:wrap;gap:6px}nav a{color:var(--acc);text-decoration:none;padding:4px 10px;border:1px solid #2a3644;border-radius:16px;font-size:14px}
+main{max-width:1100px;margin:auto;padding:0 20px 40px}section{background:var(--card);border-radius:12px;padding:18px 22px;margin:18px 0}
+h2{margin-top:0;font-size:22px}h3{font-size:18px;margin-top:26px}code{background:#0b1016;padding:1px 5px;border-radius:4px;font-size:13px;word-break:break-all}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{border-bottom:1px solid #2a3644;padding:6px 8px;text-align:left;vertical-align:top}th{color:var(--mut);font-weight:600}
+.warn{border:1px solid var(--yel);background:#2a2410}.honest{border:2px solid var(--red)}.muted{color:var(--mut);font-size:14px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:10px 0}.kpi{background:#0f1720;border-radius:10px;padding:10px 12px}
+.kpi b{display:block;font-size:24px}.kpi span{color:var(--mut);font-size:13px}.neg{color:var(--red)}.pos{color:var(--grn)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.card{background:#0f1720;border-radius:10px;padding:12px;font-size:14px}.card h4{margin:0 0 6px;color:var(--acc)}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0}.flow div{background:#0f1720;border:1px solid #2a3644;border-radius:10px;padding:8px 12px;text-align:center}.flow span{color:var(--mut)}
+.chartbox{position:relative;height:320px;margin:10px 0}.chartbox.tall{height:420px}.toggle{font-size:14px;color:var(--mut)}
+.md{background:#0b1016;border-radius:10px;padding:4px 18px;margin-top:12px;font-size:14px;overflow-x:auto}.md:empty{display:none}
+.case{background:#0f1720;border-radius:10px;padding:10px 12px;margin:8px 0;font-size:14px}.tag{display:inline-block;background:#24303e;border-radius:10px;padding:0 8px;margin:2px;font-size:12px}
+footer{text-align:center;color:var(--mut);font-size:13px;padding:20px}a{color:var(--acc)}
+.replist a{margin-right:10px;font-size:14px;cursor:pointer}

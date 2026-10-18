@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tw-quant｜台股量化判斷與每日檢討系統</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>tw-quant 台股量化判斷系統</h1>
+  <p class="sub">用免費公開資料，每天預測隔日強勢股、隔天自動檢討錯在哪裡</p>
+  <nav>
+    <a href="#honest">誠實結論</a><a href="#data">資料取得</a><a href="#features">特徵</a><a href="#algo">演算法</a>
+    <a href="#loop">每日流程</a><a href="#results">驗證與曲線</a><a href="#latest">最新預測</a><a href="#review">最新檢討</a>
+    <a href="#reports">報告</a>
+  </nav>
+</header>
+<main>
+
+<section class="warn" id="disclaimer">
+  <strong>⚠️ 免責聲明：</strong>本網站與系統僅供研究與學習用途，<b>不構成任何投資建議</b>。
+  模型預測準確度有限，過去表現不代表未來結果，投資請自行判斷並承擔風險。
+</section>
+
+<section id="honest" class="honest">
+  <h2>先講結論：目前<u>沒有</u>可實際獲利的優勢</h2>
+  <div class="kpis" id="kpis"></div>
+  <ul>
+    <li>模型的<b>排名有統計上的區辨力</b>（AUC 略高於 0.5、十分位報酬大致單調），但幾乎全部來自「<b>隔夜跳空</b>」：收盤後到隔日開盤那一段。</li>
+    <li>「收盤→隔日收盤」曲線假設能用預測日的收盤價買進，但資料要收盤後才公布，<b>實務上做不到</b>。圖中以虛線表示，僅供理解。</li>
+    <li>可執行的版本是「<b>隔日開盤買、收盤賣</b>」，扣掉手續費與證交稅後<b>明顯輸給加權指數</b>。</li>
+    <li>模型偏愛前一天漲停的股票，這類股票隔日開盤常常買不到或開高，真實結果可能更差。</li>
+  </ul>
+</section>
+
+<section id="data">
+  <h2>1. 資料怎麼取得</h2>
+  <p>全部來自免費公開來源，存入 SQLite（<code>data/tw.db</code>）。每個來源都有請求間隔，避免被封鎖。</p>
+  <table>
+    <thead><tr><th>資料</th><th>來源 / 端點</th><th>說明</th></tr></thead>
+    <tbody>
+      <tr><td>上市日行情、加權指數</td><td><code>twse.com.tw/exchangeReport/MI_INDEX?type=ALLBUT0999</code></td><td>開高低收、量、值、本益比；報酬用「漲跌價差」計算（相對參考價），除權息日不會被當成大跌</td></tr>
+      <tr><td>上市三大法人</td><td><code>twse.com.tw/fund/T86</code></td><td>外資（含外資自營商）、投信、自營商買賣超股數</td></tr>
+      <tr><td>上市融資融券</td><td><code>twse.com.tw/exchangeReport/MI_MARGN</code></td><td>融資、融券餘額（約台灣 21:00 公布）</td></tr>
+      <tr><td>上櫃日行情 / 法人 / 融資券 / 櫃買指數</td><td><code>tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes</code>、<code>insti/dailyTrade</code>、<code>margin/balance</code>、<code>indexInfo/inx</code></td><td>過濾權證、可轉債，只保留股票與 ETF</td></tr>
+      <tr><td>除權除息</td><td><code>TWT49U</code>、<code>TWT48U</code>（預告）、櫃買 <code>bulletin/exDailyQ</code></td><td>檢討時判斷是否遇到除權息</td></tr>
+      <tr><td>月營收</td><td>公開資訊觀測站彙總表 <code>mopsov.twse.com.tw/nas/t21/{sii,otc}/t21sc03_年_月_0.html</code>；最新月用 openapi <code>t187ap05_L</code> / <code>mopsfin_t187ap05_O</code></td><td>假設每月 11 日後才可用，避免偷看未來</td></tr>
+      <tr><td>產業別</td><td>證交所 / 櫃買 openapi 公司基本資料</td><td>用於產業動能與產業輪動分析</td></tr>
+      <tr><td>美股</td><td>Yahoo Finance chart API：<code>^SOX</code>、<code>TSM</code>、<code>^IXIC</code>、<code>^GSPC</code>、<code>^VIX</code></td><td>前一晚美股作為特徵；預測後當晚美股用於檢討</td></tr>
+      <tr><td>新聞標題</td><td>Google News RSS（zh-TW）</td><td>只在檢討時查詢錯判/漏網個股，關鍵字標籤（法說會、營收、訂單、處置股…）</td></tr>
+      <tr><td>休市日</td><td><code>twse.com.tw/holidaySchedule</code></td><td>判斷下一交易日；颱風假等以「有沒有資料」為準</td></tr>
+    </tbody>
+  </table>
+  <h3>速率限制與回補</h3>
+  <ul>
+    <li>證交所每次請求間隔 5 秒（約每 5 秒超過 3 次會被暫時封鎖），櫃買 2 秒，觀測站 3 秒；遇到 403/429 指數退避。</li>
+    <li>證交所與櫃買用兩個執行緒平行抓取（不同主機），每個執行緒獨立連線。</li>
+    <li>每個請求有硬性逾時；回補由 <code>scripts_backfill.sh</code> 監督，每 15 分鐘重啟一次並從 <code>fetch_log</code> 續傳，卡住也不會前功盡棄。</li>
+    <li>每日只補最近 10 天（已抓過的會跳過），幾分鐘內完成。</li>
+  </ul>
+  <div id="coverage"></div>
+</section>
+
+<section id="features">
+  <h2>2. 特徵（約 70 個，皆只用收盤後已知資訊）</h2>
+  <div class="grid">
+    <div class="card"><h4>技術面</h4>1/5/10/20/60 日報酬、MA5/20/60 乖離、RSI14、20 日波動、K 棒（跳空、實體、上影線、收盤位置）、距 20/60 日高低點、漲跌停、10 日上漲天數</div>
+    <div class="card"><h4>量能</h4>5/20 日量比、成交值 Z 分數、20 日平均成交值、股價</div>
+    <div class="card"><h4>籌碼</h4>外資/投信/自營商買賣超占成交量、5/20 日累積占均量、連買連賣天數；融資 1/5 日變化、融券變化、券資比、融資/均量</div>
+    <div class="card"><h4>大盤與美股</h4>加權/櫃買指數報酬與均線位置、指數波動、上漲家數比例、外資全市場買賣超；前一晚費半、台積電 ADR、那斯達克、VIX</div>
+    <div class="card"><h4>產業與相對強弱</h4>同產業當日/5 日平均報酬、相對產業、相對大盤，以及報酬、量比、外資的橫斷面排名</div>
+    <div class="card"><h4>營收與評價</h4>最新月營收 YoY、MoM、YoY 變化、近 3 月平均、公布後天數；本益比</div>
+  </div>
+</section>
+
+<section id="algo">
+  <h2>3. 演算法</h2>
+  <ul>
+    <li><b>股票池</b>：上市櫃普通股，20 日平均成交值 ≥ 5,000 萬、股價 ≥ 10 元、近 60 日至少 40 日有交易（每天約 650 檔）。</li>
+    <li><b>目標</b>：隔日報酬是否<b>高於當日全體股票中位數</b>（純選股，與大盤漲跌無關）；成績另以「勝過加權指數」與「絕對上漲」衡量。</li>
+    <li><b>模型</b>：LightGBM 二元分類（300 棵樹、學習率 0.03、31 葉、每葉至少 300 筆、L2 正則）。</li>
+    <li><b>Walk-forward 驗證</b>：擴張視窗，每 21 個交易日重新訓練一次，只用當時已知的資料，測試期完全樣本外。</li>
+    <li><b>每日預測</b>：用預測日以前全部已知標籤重新訓練；每檔股票用 SHAP（LightGBM <code>pred_contrib</code>）拆解看多/看空的主要因素。</li>
+    <li><b>交易成本</b>：手續費 0.1425% × 6 折 × 2 + 證交稅 0.3% ≈ 每次來回 0.47%；未計滑價與漲停買不到。</li>
+  </ul>
+</section>
+
+<section id="loop">
+  <h2>4. 每日流程：預測 → 檢討 → 找原因</h2>
+  <div class="flow">
+    <div>① 更新資料<br><small>台灣 21:30 後</small></div><span>→</span>
+    <div>② 檢討昨天的預測<br><small>命中率、AUC、Rank IC</small></div><span>→</span>
+    <div>③ 根因分析<br><small>錯判 + 漏掉的大漲股</small></div><span>→</span>
+    <div>④ 累積錯誤模式<br><small>建議新增特徵</small></div><span>→</span>
+    <div>⑤ 預測下一交易日<br><small>Top 10 + 因素拆解</small></div>
+  </div>
+  <p>根因分析會把實際報酬拆成「大盤 + 產業超額 + 個股特有」，再檢查：大盤系統性漲跌、<b>預測後當晚美股</b>（費半、台積電 ADR）、產業輪動、除權息、月營收公布、新聞事件（法說會、訂單、處置股、目標價…）、追高反轉、籌碼反轉、漲停題材、隔日法人同步大買。原因與當時的主要特徵寫進累積紀錄，統計哪類錯誤最常見，並對應到建議新增的特徵。</p>
+  <div class="chartbox"><canvas id="errChart"></canvas></div>
+</section>
+
+<section id="results">
+  <h2>5. 驗證結果與獲利曲線（樣本外）</h2>
+  <p id="valPeriod" class="muted"></p>
+  <div id="valTable"></div>
+  <h3>Top-10 每日等權回測：累積淨值</h3>
+  <p class="muted">實線＝可實際執行（隔日開盤買、收盤賣），虛線＝無法實現的「收盤→收盤」理論值（對數座標）。</p>
+  <div class="chartbox tall"><canvas id="eqChart"></canvas></div>
+  <label class="toggle"><input type="checkbox" id="logScale" checked> 對數座標</label>
+  <h3>十分位：模型分數由低到高的隔日平均超額報酬（bp）</h3>
+  <div class="chartbox"><canvas id="decChart"></canvas></div>
+  <h3>Top-10 命中率（勝過加權指數）</h3>
+  <p class="muted">walk-forward 樣本外累積命中率、20 日移動命中率，對照全體股票勝過加權指數的比例。</p>
+  <div class="chartbox"><canvas id="hitChart"></canvas></div>
+  <h3>上線後實際檢討紀錄（每日累積）</h3>
+  <div class="chartbox"><canvas id="liveChart"></canvas></div>
+  <p id="liveNote" class="muted"></p>
+</section>
+
+<section id="latest">
+  <h2>6. 最新預測</h2>
+  <div id="latestPred"></div>
+</section>
+
+<section id="review">
+  <h2>7. 最新檢討</h2>
+  <div id="latestReview"></div>
+</section>
+
+<section id="reports">
+  <h2>8. 完整報告</h2>
+  <div id="reportList"></div>
+  <div id="mdView" class="md"></div>
+</section>
+
+<section>
+  <h2>原始碼</h2>
+  <p><a href="https://github.com/ejeanlien/tw-quant">github.com/ejeanlien/tw-quant</a>：Python（<code>twq/</code>），一鍵每日流程 <code>run_daily.sh</code>，網站資料由 <code>python -m twq site</code> 產生。</p>
+</section>
+</main>
+<footer><span id="gen"></span> · 不構成投資建議</footer>
+<script src="app.js"></script>
+</body>
+</html>

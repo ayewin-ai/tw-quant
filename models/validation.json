@@ -1,0 +1,70 @@
+{
+  "n_obs": 125405,
+  "n_days": 178,
+  "test_period": [
+    "2026-01-19",
+    "2026-10-15"
+  ],
+  "base_rate_beat_median": 0.4969419082173757,
+  "base_rate_excess_up": 0.4425660858817432,
+  "auc": 0.5340919761544025,
+  "auc_vs_taiex_excess": 0.5375142127894291,
+  "accuracy@0.5": 0.5244129021968821,
+  "rank_ic_mean": 0.08374677210239977,
+  "rank_ic_ir": 8.217401700018689,
+  "top10_precision_beat_median": 0.6376404494382022,
+  "top10_precision_excess": 0.599438202247191,
+  "top10_precision_abs_up": 0.6191011235955056,
+  "universe_abs_up_rate": 0.4680515130975639,
+  "top10_avg_excess_bp": 191.35282633144436,
+  "decile_avg_excess_bp": {
+    "0": -50.0,
+    "1": -22.6,
+    "2": -21.4,
+    "3": -17.3,
+    "4": -14.2,
+    "5": -12.5,
+    "6": -3.9,
+    "7": 2.9,
+    "8": 7.8,
+    "9": 69.7
+  },
+  "backtest": {
+    "days": 178,
+    "cum_ret_top_close2close_gross": 40.271209119095474,
+    "cum_ret_top_close2close_net": 19.29363753754103,
+    "cum_ret_top_open2close_gross": -0.2519655737904287,
+    "cum_ret_top_open2close_net": -0.677703653434523,
+    "cum_ret_taiex": 0.4894695973325147,
+    "avg_turnover": 0.8623595505617979,
+    "daily_win_rate_vs_taiex(gross c2c)": 0.7865168539325843,
+    "sharpe_c2c_gross": 11.48210127617508,
+    "sharpe_taiex": 2.0247794131852377
+  },
+  "baseline_reversal": {
+    "auc": 0.4937975810213442,
+    "rank_ic_mean": -0.020939013912827476,
+    "top10_precision_excess": 0.38033707865168537,
+    "top10_avg_excess_bp": -118.17853747635885,
+    "cum_ret_top_open2close_net": -0.7457115519743136,
+    "cum_ret_top_close2close_gross": -0.8286157415331147
+  },
+  "top_features_gain": {
+    "mkt_ma60": 11721.5,
+    "mkt_r1": 11020.5,
+    "us_tsm": 10239.9,
+    "us_sox": 8641.7,
+    "mkt_f_net": 7871.8,
+    "us_ndx": 7757.8,
+    "mkt_ma20": 7692.9,
+    "vol20": 7439.2,
+    "mkt_r5": 7400.2,
+    "mkt_vol20": 6982.8,
+    "sec_r5": 6945.9,
+    "rev_fresh": 5759.4,
+    "us_vix": 5366.4,
+    "sec_r1": 5231.9,
+    "breadth": 4694.6
+  },
+  "generated": "2026-10-18T11:00:30"
+}

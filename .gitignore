@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+data/tw.db*
+data/raw/
+data/predictions/
+models/*
+!models/validation.json
+logs/
+reports/backtest_daily.csv
+*.parquet
+*.csv.gz
+.DS_Store
