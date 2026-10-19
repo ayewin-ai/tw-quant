@@ -103,7 +103,7 @@ def pending_predictions():
     done = {p.stem.replace("review_", "") for p in REVIEW_REPORT_DIR.glob("review_*.md")}
     tdays = set(F.trading_days())
     out = []
-    for p in sorted(PRED_DIR.glob("*.json")):
+    for p in sorted(p for p in PRED_DIR.glob("*.json") if not p.name.startswith("preopen_")):
         if p.stem in done:
             continue
         o = json.loads(p.read_text())

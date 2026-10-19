@@ -28,7 +28,9 @@ fi
 echo "--- [4/5] 更新網站資料 docs/"
 $PY -m twq site || echo "網站資料產生失敗"
 echo "--- [5/5] 推送網站更新到 GitHub"
-if [[ -n "$(git status --porcelain docs reports models/validation.json)" ]]; then
+if [[ -n "${TWQ_NOPUSH:-}" ]]; then
+  echo "TWQ_NOPUSH 已設定：略過 commit/push（dry-run）"
+elif [[ -n "$(git status --porcelain docs reports models/validation.json)" ]]; then
   git add docs reports models/validation.json && git commit -q -m "daily update ${TWDATE}" && git push -q origin main && echo "已推送" || echo "推送失敗"
 else
   echo "沒有變更，不推送"
