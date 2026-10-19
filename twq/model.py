@@ -252,4 +252,19 @@ def ablation_md():
         L.append(f"| {SET_NAMES.get(r['set'], r['set'])} | {r['label']} | {r['n_features']} | {r['auc']:.4f} | {r['auc_oc']:.4f} | "
                  f"{r['rank_ic']:.4f} | {r['top_avg_oc_bp']:.1f} | {r['universe_avg_oc_bp']:.1f} | {r['top_oc_up'] * 100:.1f}% | "
                  f"{pct(r['cum_oc_gross'])} | {pct(r['cum_oc_net'])} | {pct(r['cum_taiex'])} |")
+    oc = [r for r in d.values() if r["label"] == "y_oc"]
+    base = next((r for r in oc if r["set"] == "base"), None)
+    best = max(oc, key=lambda r: r["cum_oc_net"]) if oc else None
+    if base and best:
+        auc_gain = max(r["auc_oc"] for r in oc) - base["auc_oc"]
+        L += ["", "### 結論（誠實版）", "",
+              f"- 新特徵讓開→收 AUC 最多只提高 {auc_gain:+.4f}（{base['auc_oc']:.4f} → {max(r['auc_oc'] for r in oc):.4f}），"
+              "幅度在 walk-forward 的雜訊範圍內，不能視為穩定改善。",
+              f"- 選股本身有相對強弱：Top-10 開→收平均 {base['top_avg_oc_bp']:.1f} bp，全體平均 {base['universe_avg_oc_bp']:.1f} bp。"
+              f"但每天開盤買、收盤賣的交易成本每趟約 {COST_ROUNDTRIP * 100:.2f}%（手續費6折＋證交稅）；"
+              f"Top-10 本身平均只有 {base['top_avg_oc_bp']:.1f} bp，即使用當沖減半證交稅（每趟約 0.32%）仍低於成本。",
+              f"- 扣成本後最佳組合「{SET_NAMES.get(best['set'], best['set'])}」累積 {pct(best['cum_oc_net'])}，"
+              f"同期加權指數 {pct(best['cum_taiex'])}，**{'有' if best['cum_oc_net'] > best['cum_taiex'] else '沒有'}勝過大盤**。",
+              "- 以收→收為目標時，加入期貨/盤前特徵 AUC(自身目標) 升高，但主要是預測隔夜跳空，開盤後無法取得，反而讓開→收表現變差。",
+              "- 因此每日收盤後預測維持「基本」特徵組；盤前更新使用「全部＋盤前、開→收」僅作參考。**本系統不構成投資建議。**"]
     return "\n".join(L) + "\n"

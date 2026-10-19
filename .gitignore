@@ -12,3 +12,4 @@ reports/backtest_daily.csv
 *.csv.gz
 .DS_Store
 .devenv
+.venv
