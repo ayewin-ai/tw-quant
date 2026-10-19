@@ -11,3 +11,4 @@ reports/backtest_daily.csv
 *.parquet
 *.csv.gz
 .DS_Store
+.devenv

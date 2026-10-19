@@ -47,7 +47,19 @@ FEATURE_INFO = {
     "rk_r1": ("相對強弱", "當日報酬排名"), "rk_r5": ("相對強弱", "5日報酬排名"),
     "rk_r20": ("相對強弱", "20日報酬排名"), "rk_vr": ("量能", "量比排名"), "rk_f5": ("籌碼-外資", "外資5日排名"),
 }
-FEATURES = list(FEATURE_INFO)
+from . import features_ext as FX
+
+BASE_FEATURES = list(FEATURE_INFO)
+FEATURE_INFO.update(FX.INFO)
+FEATURE_SETS = {
+    "base": BASE_FEATURES,
+    "+futures": BASE_FEATURES + FX.FUT,
+    "+global": BASE_FEATURES + FX.GLOBAL,
+    "+events": BASE_FEATURES + FX.EVENTS + FX.STOCK_EXT,
+    "all_base": BASE_FEATURES + FX.FUT + FX.GLOBAL + FX.EVENTS + FX.STOCK_EXT,
+    "preopen": BASE_FEATURES + FX.FUT + FX.GLOBAL + FX.EVENTS + FX.STOCK_EXT + FX.PREOPEN,
+}
+FEATURES = BASE_FEATURES  # default (overridden by config of the trained model)
 
 
 def category(feat):
@@ -93,7 +105,7 @@ def load(start=None, end=None):
     return px, inst, mg, idx, us, rev, info
 
 
-def build(start=None, end=None, with_labels=True, min_hist=None):
+def build(start=None, end=None, with_labels=True, min_hist=None, next_day=None):
     import os
     min_hist = min_hist or int(os.environ.get("TWQ_MIN_HIST", 40))
     px, inst, mg, idx, us, rev, info = load(start, end)
@@ -219,6 +231,10 @@ def build(start=None, end=None, with_labels=True, min_hist=None):
     f["rel_r1"] = f["r1"].sub(mkt["mkt_r1"], axis=0)
     f["rel_r5"] = f["r5"].sub(mkt["mkt_r5"], axis=0)
     f["pe"] = pe
+    mk = mkt["mkt_r1"]
+    rm = r.mul(mk, axis=0).rolling(60, min_periods=30).mean()
+    cov = rm - r.rolling(60, min_periods=30).mean().mul(mk.rolling(60, min_periods=30).mean(), axis=0)
+    f["beta60"] = cov.div(mk.rolling(60, min_periods=30).var(ddof=0), axis=0).clip(-1, 4)
 
     # revenue: month M available from day 11 of month M+1
     rev = rev[rev.code.isin(close.columns)].copy()
@@ -261,9 +277,16 @@ def build(start=None, end=None, with_labels=True, min_hist=None):
     X = X[univ.stack(future_stack=True).reindex(X.index).fillna(False).values]
     X.index.names = ["date", "code"]
     X = X.join(mkt, on="date")
+    try:
+        X = X.join(FX.market(days, tclose, next_day), on="date")
+    except Exception as e:  # extra tables missing -> NaN features
+        print("ext features unavailable:", e)
+        for c in FX.FUT + FX.GLOBAL + FX.EVENTS + FX.PREOPEN:
+            X[c] = np.nan
     X["industry"] = ind.reindex(X.index.get_level_values("code")).values
     X["close"] = close.stack(future_stack=True).reindex(X.index).values
     X["value"] = val.stack(future_stack=True).reindex(X.index).values
+    X = FX.stock_level(X)
 
     if with_labels:
         nxt_ret = ret.where(traded).shift(-1)
@@ -278,6 +301,8 @@ def build(start=None, end=None, with_labels=True, min_hist=None):
         X["next_xs"] = X["next_ret"] - med
         # label: beat the cross-sectional median next day (pure stock selection, market-neutral)
         X["y"] = (X["next_xs"] > 0).astype(float).where(X["next_ret"].notna())
+        med_oc = X.groupby(level="date")["next_oc"].transform("median")
+        X["y_oc"] = (X["next_oc"] > med_oc).astype(float).where(X["next_oc"].notna())
     X = X.replace([np.inf, -np.inf], np.nan).sort_index()
     return X
 

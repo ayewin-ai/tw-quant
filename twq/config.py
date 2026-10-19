@@ -2,7 +2,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
-DB_PATH = DATA / "tw.db"
+import os
+DB_PATH = Path(os.environ.get("TWQ_DB", str(DATA / "tw.db")))
 PRED_DIR = DATA / "predictions"
 REPORT_DIR = ROOT / "reports"
 PREDICT_REPORT_DIR = REPORT_DIR / "predict"
@@ -29,3 +30,9 @@ US_SYMBOLS = {"^SOX": "sox", "TSM": "tsm_adr", "^GSPC": "spx", "^IXIC": "nasdaq"
 
 DISCLAIMER = ("⚠️ 免責聲明：本報告由程式依公開資料自動產生，僅供研究與學習用途，"
               "不構成任何投資建議。模型預測準確度有限，過去表現不代表未來結果，投資請自行判斷並承擔風險。")
+
+# Feature set / label used by the daily (post-close) model. Chosen from the ablation (see reports/validation.md).
+PREDICT_SET = os.environ.get("TWQ_SET", "base")
+PREDICT_LABEL = os.environ.get("TWQ_LABEL", "y")
+# Prior-day limit-up stocks: "flag" (mark only), "penalize" (-0.05 score), "exclude" (drop from top list)
+LIMITUP_MODE = os.environ.get("TWQ_LIMITUP", "flag")

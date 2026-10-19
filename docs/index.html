@@ -14,7 +14,7 @@
   <p class="sub">用免費公開資料，每天預測隔日強勢股、隔天自動檢討錯在哪裡</p>
   <nav>
     <a href="#honest">誠實結論</a><a href="#data">資料取得</a><a href="#features">特徵</a><a href="#algo">演算法</a>
-    <a href="#loop">每日流程</a><a href="#results">驗證與曲線</a><a href="#latest">最新預測</a><a href="#review">最新檢討</a>
+    <a href="#extdata">期貨/國際/事件</a><a href="#loop">每日流程</a><a href="#ablation">特徵比較</a><a href="#preopen">盤前更新</a><a href="#results">驗證與曲線</a><a href="#latest">最新預測</a><a href="#review">最新檢討</a>
     <a href="#reports">報告</a>
   </nav>
 </header>
@@ -62,6 +62,36 @@
     <li>每日只補最近 10 天（已抓過的會跳過），幾分鐘內完成。</li>
   </ul>
   <div id="coverage"></div>
+</section>
+
+<section id="extdata">
+  <h2>1b. 期貨、國際股市與事件風險（2026-10 新增）</h2>
+  <table>
+    <thead><tr><th>類別</th><th>來源</th><th>特徵</th><th>歷史</th></tr></thead>
+    <tbody>
+      <tr><td>台指期貨</td><td>期交所 <code>futDataDown</code>（一般+盤後）、<code>futContractsDateDown</code>（三大法人）、<code>pcRatioDown</code></td>
+        <td>台指期日盤漲跌、基差、成交量比、外資/投信淨未平倉與變化、P/C 比；<b>夜盤漲跌（盤前專用）</b></td><td>2024-06 起</td></tr>
+      <tr><td>國際股市與總經</td><td>Yahoo chart API：日經、韓股、恆生、上證、DAX、STOXX50、S&P/那指期貨、美元/台幣、美10年殖利率、美元指數、原油、黃金、VIX</td>
+        <td>當日/5 日報酬、利率變化</td><td>3 年</td></tr>
+      <tr><td>地緣政治 / 突發事件</td><td>GDELT 1.0 每日事件檔（<code>data.gdeltproject.org/events</code>）</td>
+        <td>中台相關衝突事件、戰爭（CAMEO 19/20）、制裁（163x/172x）、攻擊/抗議（14/18）的報導占比與語調 Z 分數</td><td>2024-06 起</td></tr>
+      <tr><td>氣候災害</td><td>USGS 地震 API（台灣附近 M≥5）；Google News 中文關鍵字量（地震/颱風/水災…）</td>
+        <td>72 小時內最大規模、距上次地震天數、災害新聞量 Z；與半導體/營建/航運的交互作用</td><td>地震完整；新聞量部分</td></tr>
+      <tr><td>中文新聞量</td><td>Google News RSS（zh-TW）：地緣政治、制裁關稅、氣候災害、突發事件</td><td>前一日新聞量 Z 分數</td><td>逐步回補中（每次查詢上限 100 則，只是粗略強度）</td></tr>
+    </tbody>
+  </table>
+  <h3>時間對齊（避免偷看未來）</h3>
+  <table>
+    <thead><tr><th>資訊</th><th>收盤後模型（台灣 21:30 執行）</th><th>盤前模型（台灣 07:00–08:30 執行）</th></tr></thead>
+    <tbody>
+      <tr><td>台指期日盤、法人未平倉、P/C</td><td>當日 t</td><td>當日 t</td></tr>
+      <tr><td>台指期夜盤（t 15:00 → T 05:00）</td><td>✗ 尚未發生</td><td>✓</td></tr>
+      <tr><td>日韓港陸股</td><td>當日 t 收盤（皆在台灣 16:00 前收）</td><td>同左</td></tr>
+      <tr><td>歐股、美股、匯率、原油、黃金</td><td>前一日（日期 &lt; t）</td><td>當日 t 收盤</td></tr>
+      <tr><td>GDELT 事件檔</td><td>日期 &lt; t（t 的檔案在 T 14:00 台灣才發布）</td><td>同左</td></tr>
+      <tr><td>地震</td><td>t 21:30 前 72 小時</td><td>到 T 08:00 前 24 小時</td></tr>
+    </tbody>
+  </table>
 </section>
 
 <section id="features">
@@ -117,6 +147,19 @@
   <h3>上線後實際檢討紀錄（每日累積）</h3>
   <div class="chartbox"><canvas id="liveChart"></canvas></div>
   <p id="liveNote" class="muted"></p>
+</section>
+
+<section id="ablation">
+  <h2>5b. 新特徵有沒有幫助？（Ablation）</h2>
+  <p class="muted">同一個 walk-forward 切分，逐一加入期貨、國際股市、事件風險、盤前資訊。重點看「開→收累積（扣成本）」：這才是可以實際執行的結果。</p>
+  <div id="ablationTable"></div>
+  <div class="chartbox tall"><canvas id="ablChart"></canvas></div>
+  <p id="ablNote"></p>
+</section>
+
+<section id="preopen">
+  <h2>6b. 最新盤前更新預測</h2>
+  <div id="latestPreopen"><p class="muted">尚無盤前更新。</p></div>
 </section>
 
 <section id="latest">

@@ -30,10 +30,20 @@ def main(argv=None):
     a = sub.add_parser("validate", help="walk-forward 驗證 + top-10 回測")
     a.add_argument("--start", default=None, help="測試期起日")
 
+    a = sub.add_parser("ablation", help="特徵組比較 (base/+futures/+global/+events/all/preopen)")
+    a.add_argument("--start", default="2025-03-01")
+    a.add_argument("--step", type=int, default=42)
+
     a = sub.add_parser("predict", help="以 DATE 收盤資料預測下一交易日")
     a.add_argument("--date", default=None)
     a.add_argument("--no-update", action="store_true")
     a.add_argument("--top", type=int, default=None)
+    a.add_argument("--limitup", choices=["flag", "penalize", "exclude"], default=None)
+
+    a = sub.add_parser("preopen", help="盤前更新：加入台指期夜盤/美股收盤/隔夜事件重算目標日預測")
+    a.add_argument("--target", default=None, help="目標交易日 (預設: 下一個交易日)")
+    a.add_argument("--no-update", action="store_true")
+    a.add_argument("--limitup", choices=["flag", "penalize", "exclude"], default=None)
 
     a = sub.add_parser("review", help="檢討 DATE 那天產生的預測 (預設: 最近一個已有實際結果的預測)")
     a.add_argument("--date", default=None, help="預測產生日 (prediction date)")
@@ -53,12 +63,23 @@ def main(argv=None):
         from . import fetch
         end = parse_date(args.end) or tw_today()
         fetch.update(end - dt.timedelta(days=args.days), end)
+        try:
+            from . import fetch_ext
+            fetch_ext.update(end - dt.timedelta(days=args.days), end)
+        except Exception as e:  # extra data must never break the daily pipeline
+            print("extra data update failed:", e)
     elif args.cmd == "validate":
         from . import model
         model.validate(args.start)
+    elif args.cmd == "ablation":
+        from . import model
+        model.ablation(args.start, args.step)
     elif args.cmd == "predict":
         from . import predict
-        predict.run(parse_date(args.date), update=not args.no_update, top=args.top)
+        predict.run(parse_date(args.date), update=not args.no_update, top=args.top, limitup=args.limitup)
+    elif args.cmd == "preopen":
+        from . import predict
+        predict.run_preopen(parse_date(args.target), update=not args.no_update, limitup=args.limitup)
     elif args.cmd == "review":
         from . import review
         review.run(parse_date(args.date), update=not args.no_update, news=not args.no_news)

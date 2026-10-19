@@ -27,6 +27,11 @@ SUGGEST = {
     "籌碼反轉": "加入法人買超持續性、券商分點（主力）資料與借券賣出資料。",
     "漲停/題材": "加入題材熱度（新聞量突增、族群同時漲停數）與注意股名單。",
     "法人同步買超": "隔日法人大買是同時發生的資訊，可考慮預測「法人是否持續買超」作為中介特徵。",
+    "期貨夜盤": "使用盤前更新預測（twq preopen，納入台指期夜盤與美股收盤），並以開盤→收盤為目標。",
+    "國際股市": "已加入日韓港陸歐股與美股期貨；若仍常出現，可加入亞股盤中即時（開盤後）資訊或區域相關性特徵。",
+    "地緣政治": "已加入 GDELT 台海/戰爭/制裁新聞量與中文新聞量；可再加入國防/航運族群的事件交互作用或改用更即時的新聞流。",
+    "氣候災害": "已加入 USGS 地震與災害新聞量；可再加入氣象署颱風警報（需 API 金鑰）與停班停課資訊。",
+    "突發事件": "突發事件難以預測；建議加入盤前事件掃描與風險開關（事件指數過高時降低部位）。",
     "個股特有/無法解釋": "可能為隨機雜訊；持續累積觀察，若集中在特定產業或股價區間再加特徵。",
 }
 
@@ -51,6 +56,47 @@ def _us_between(pred_date, target):
         return {}, []
     out = {s: float((1 + g.ret.fillna(0)).prod() - 1) for s, g in df.groupby("symbol")}
     return out, sorted(df.date.unique())
+
+
+def _ext_context(pred_date, target):
+    """Overnight / global / event context between prediction (after close of pred_date) and target close."""
+    out = {}
+    try:
+        con = db.connect()
+        r = con.execute("SELECT close, change FROM taifex_tx WHERE date=? AND session='night'", (target,)).fetchone()
+        if r and r[0] and r[1] is not None:
+            out["night_ret"] = r[1] / (r[0] - r[1])
+        w = dict(con.execute("SELECT symbol, ret FROM us_daily WHERE date=? AND symbol IN ('nikkei','kospi','hsi')",
+                             (target,)).fetchall())
+        if w:
+            out["asia"] = float(np.nanmean([v for v in w.values() if v is not None]))
+        e = [v for (v,) in con.execute("SELECT ret FROM us_daily WHERE date=? AND symbol IN ('dax','stoxx50')", (pred_date,))
+             if v is not None]
+        out["europe"] = float(np.mean(e)) if e else None
+        q = con.execute("SELECT MAX(mag) FROM quakes WHERE time_utc>=? AND time_utc<?",
+                        (pred_date + "T05:30:00", target + "T05:30:00")).fetchone()
+        out["quake"] = q[0]
+
+        def z(table, topic, col):
+            df = pd.read_sql(f"SELECT date, {col} AS v FROM {table} WHERE topic=? AND date<=? ORDER BY date DESC LIMIT 61",
+                             con, params=(topic, target))
+            if len(df) < 15:
+                return None
+            v = df.v.astype(float)
+            recent = v.iloc[:2].max()
+            return float((recent - v.iloc[2:].mean()) / (v.iloc[2:].std() or 1))
+        zs = [z("gdelt_daily", t, "volume") for t in ("taiwan_strait", "war", "sanctions_tariff")] + \
+             [z("news_counts", t, "n") for t in ("地緣政治", "制裁關稅")]
+        zs = [x for x in zs if x is not None]
+        out["geo_z"] = max(zs) if zs else None
+        dz = [x for x in (z("gdelt_daily", "disaster", "volume"), z("news_counts", "氣候災害", "n")) if x is not None]
+        out["disaster_z"] = max(dz) if dz else None
+        ez = [x for x in (z("gdelt_daily", "emergency", "volume"), z("news_counts", "突發事件", "n")) if x is not None]
+        out["emergency_z"] = max(ez) if ez else None
+        con.close()
+    except Exception as e:
+        out["error"] = str(e)
+    return out
 
 
 def pending_predictions():
@@ -130,6 +176,19 @@ def classify(kind, s, ctx, drivers, news_items, inst_row):
             causes.append(("漲停/題材", f"目標日漲停 {s['ret']:+.2%}"))
         if inst_row is not None and s.get("avg_vol") and (inst_row.get("total_net") or 0) > 0.1 * s["avg_vol"]:
             causes.append(("法人同步買超", f"目標日三大法人買超 {inst_row['total_net'] / 1000:,.0f} 張"))
+    ex = ctx.get("ext") or {}
+    nr = ex.get("night_ret")
+    if nr is not None and sign * nr >= 0.01:
+        causes.append(("期貨夜盤", f"預測後台指期夜盤 {nr:+.2%}"))
+    asia = ex.get("asia")
+    if asia is not None and sign * asia >= 0.015:
+        causes.append(("國際股市", f"目標日亞股平均（日經/韓股/恆生）{asia:+.2%}；歐股 {_p(ex.get('europe'))}"))
+    if ex.get("geo_z") is not None and ex["geo_z"] >= 2:
+        causes.append(("地緣政治", f"地緣政治新聞量異常（Z={ex['geo_z']:.1f}）"))
+    if (ex.get("quake") or 0) >= 5.5 or (ex.get("disaster_z") or 0) >= 2:
+        causes.append(("氣候災害", f"台灣附近地震 M{ex.get('quake') or 0:.1f}；災害新聞 Z={ex.get('disaster_z') or 0:.1f}"))
+    if (ex.get("emergency_z") or 0) >= 2:
+        causes.append(("突發事件", f"突發事件新聞量異常（Z={ex['emergency_z']:.1f}）"))
     if not causes:
         causes.append(("個股特有/無法解釋", f"個股特有部分 {s['idio']:+.2%}"))
     return causes
@@ -151,7 +210,8 @@ def review_one(pred_date, target, news=True):
     df["y"] = (df.ret > df.ret.median()).astype(int)
     top_n = o["top_n"]
     top = df[df["rank"] <= top_n].sort_values("rank")
-    ctx = {"mkt": mkt, "us": us, "target_day": dt.date.fromisoformat(target).day}
+    ctx = {"mkt": mkt, "us": us, "target_day": dt.date.fromisoformat(target).day,
+           "ext": _ext_context(pred_date, target)}
     # metrics
     try:
         auc = float(roc_auc_score(df.y, df.prob))
@@ -168,6 +228,8 @@ def review_one(pred_date, target, news=True):
             "top_decile_excess": float(top_dec), "bottom_decile_excess": float(bot_dec),
             "taiex": mkt, "otc": otc, "breadth": breadth,
             "us_sox": us.get("sox"), "us_tsm": us.get("tsm_adr")}
+    for k in ("night_ret", "asia", "geo_z", "quake"):
+        perf[k] = ctx["ext"].get(k)
 
     # monthly revenue context
     con = db.connect()
@@ -233,7 +295,9 @@ def render(o, perf, top, analyses, sec, us, us_dates, df):
          f"最高十分位超額 {_p(perf['top_decile_excess'])} vs 最低十分位 {_p(perf['bottom_decile_excess'])}",
          f"- 市場：加權 {_p(perf['taiex'])}、櫃買 {_p(perf['otc'])}、上漲家數比例 {_p(perf['breadth'], False)}",
          f"- 預測後美股（{', '.join(us_dates) or '無'}）：費半 {_p(us.get('sox'))}、台積電ADR {_p(us.get('tsm_adr'))}、"
-         f"那指 {_p(us.get('nasdaq'))}、S&P500 {_p(us.get('spx'))}", "",
+         f"那指 {_p(us.get('nasdaq'))}、S&P500 {_p(us.get('spx'))}",
+         f"- 台指期夜盤 {_p(perf.get('night_ret'))}；目標日亞股平均 {_p(perf.get('asia'))}；地緣政治新聞Z {perf.get('geo_z') if perf.get('geo_z') is None else round(perf['geo_z'], 1)}；"
+         f"地震 M{perf.get('quake') or 0}", "",
          "## Top 名單逐檔結果", "",
          "| # | 代號 | 名稱 | 產業 | 機率 | 實際報酬 | 超額 | 產業超額 | 個股特有 | 結果 |", "|---|---|---|---|---|---|---|---|---|---|"]
     for c, r in top.iterrows():

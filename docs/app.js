@@ -10,6 +10,9 @@ window.charts = {};
   const [meta, val, eq, hit, live, err, lp, lr] = await Promise.all(
     ['meta.json', 'validation.json', 'equity.json', 'hitrate_oos.json', 'performance_live.json',
      'error_patterns.json', 'latest_prediction.json', 'latest_review.json'].map(J));
+  const [abl, pre] = await Promise.all(['ablation.json', 'latest_preopen.json'].map(J));
+  if (abl) renderAblation(abl);
+  if (pre) renderPreopen(pre);
   window.siteData = {meta, val, eq, hit, live, err, lp, lr};
   if (meta) {
     $('gen').textContent = `資料更新：${meta.generated_at} (UTC)`;
@@ -137,4 +140,41 @@ async function showMd(path) {
   const t = await fetch(path).then(r => r.text());
   $('mdView').innerHTML = marked.parse(t);
   $('mdView').scrollIntoView({behavior: 'smooth'});
+}
+
+
+async function renderAblation(a) {
+  const rows = a.rows, pc = x => x == null ? 'NA' : `${x > 0 ? '+' : ''}${(x * 100).toFixed(1)}%`;
+  $('ablationTable').innerHTML = `<table><tr><th>特徵組</th><th>目標</th><th>特徵數</th><th>AUC(開→收)</th><th>Rank IC</th><th>Top-10 開→收平均</th><th>全體開→收平均</th><th>開→收累積(扣成本)</th><th>加權指數</th></tr>
+  ${rows.map(r => `<tr><td>${a.names[r.set] || r.set}</td><td>${r.label === 'y_oc' ? '開→收' : '收→收'}</td><td>${r.n_features}</td><td>${r.auc_oc.toFixed(4)}</td>
+    <td>${r.rank_ic.toFixed(4)}</td><td>${r.top_avg_oc_bp.toFixed(1)} bp</td><td>${r.universe_avg_oc_bp.toFixed(1)} bp</td>
+    <td class="${cls(r.cum_oc_net)}">${pc(r.cum_oc_net)}</td><td>${pc(r.cum_taiex)}</td></tr>`).join('')}</table>`;
+  const colors = ['#8b949e', '#4fa3ff', '#ffd166', '#c084fc', '#3ddc97', '#ff6b6b'];
+  const sets = rows.filter(r => r.label === 'y_oc');
+  const ds = [];
+  let labels = null, taiex = null;
+  for (const [i, r] of sets.entries()) {
+    const e = await J(`ablation_eq_${r.set.replace('+', 'p')}_${r.label}.json`);
+    if (!e) continue;
+    labels = labels || e.dates; taiex = taiex || e.taiex;
+    ds.push({label: `${a.names[r.set] || r.set}（開→收扣成本）`, data: e.oc_net, borderColor: colors[i % 6], pointRadius: 0, borderWidth: r.set === 'preopen' ? 3 : 1.5});
+  }
+  if (labels) {
+    ds.push({label: '加權指數', data: taiex, borderColor: '#ffffff', borderDash: [6, 4], pointRadius: 0, borderWidth: 2});
+    charts.abl = new Chart($('ablChart'), {type: 'line', data: {labels, datasets: ds},
+      options: {responsive: true, maintainAspectRatio: false, interaction: {mode: 'index', intersect: false},
+        scales: {y: {title: {display: true, text: '淨值（起始=1，開盤買收盤賣、扣成本）'}}, x: {ticks: {maxTicksLimit: 12}}}}});
+  }
+  const best = sets.reduce((m, r) => (m == null || r.cum_oc_net > m.cum_oc_net) ? r : m, null);
+  if (best) $('ablNote').innerHTML = `可執行版本中最好的是「${a.names[best.set] || best.set}」：開→收扣成本累積 <b class="${cls(best.cum_oc_net)}">${pc(best.cum_oc_net)}</b>，同期加權指數 ${pc(best.cum_taiex)}。` +
+    (best.cum_oc_net > best.cum_taiex ? '' : ' <b>仍未勝過大盤</b>，請勿當作投資依據。');
+}
+
+function renderPreopen(p) {
+  const o = p.overnight || {};
+  $('latestPreopen').innerHTML = `<p>目標日 <b>${p.target_date}</b>（以 ${p.pred_date} 收盤資料＋隔夜資訊；特徵組 ${p.model.feature_set}，目標＝開盤→收盤）。</p>
+  <p class="muted">台指期夜盤 ${pct(o.tx_night_ret)}、費半 ${pct(o.us_sox_on)}、台積電 ADR ${pct(o.us_tsm_on)}、那指 ${pct(o.us_ndx_on)}、美元/台幣 ${pct(o.usdtwd_on)}</p>
+  <table><tr><th>#</th><th>代號</th><th>名稱</th><th>產業</th><th>機率</th><th>前日漲跌</th><th>主要因素</th></tr>
+  ${p.top.map(r => `<tr><td>${r.rank}</td><td>${r.code}</td><td>${r.name}${r.limitup ? ' ⚠️漲停追高' : ''}</td><td>${r.industry}</td><td>${(r.prob * 100).toFixed(1)}%</td>
+    <td class="${cls(r.r1)}">${pct(r.r1)}</td><td>${r.pos.join('；')}</td></tr>`).join('')}</table>`;
 }

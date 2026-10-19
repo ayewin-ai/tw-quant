@@ -99,18 +99,35 @@ def build():
                                        "wrong_pick": tab.get("wrong_pick", pd.Series(0, index=tab.index)).tolist(),
                                        "missed_winner": tab.get("missed_winner", pd.Series(0, index=tab.index)).tolist()})
 
+    ab = MODEL_DIR / "ablation.json"
+    if ab.exists():
+        from .model import SET_NAMES
+        d = json.loads(ab.read_text())
+        _dump("ablation.json", {"rows": list(d.values()), "names": SET_NAMES})
+        for f in MODEL_DIR.glob("ablation_daily_*.csv"):
+            b = pd.read_csv(f)
+            key = f.stem.replace("ablation_daily_", "")
+            _dump(f"ablation_eq_{key.replace('+', 'p')}.json", {"dates": b.date.tolist(), "oc_net": b.oc_net_equity.tolist(),
+                                                               "taiex": b.mkt_equity.tolist()})
+    pre = sorted(PRED_DIR.glob("preopen_*.json"))
+    if pre:
+        o = json.loads(pre[-1].read_text())
+        top = [{k: r.get(k) for k in ("rank", "code", "name", "industry", "prob", "close", "r1", "limitup")} |
+               {"pos": [f"{f['label']} {f['value_str']}" for f in r["factors_pos"][:3]]} for r in o["predictions"][: o["top_n"]]]
+        _dump("latest_preopen.json", {"target_date": o["target_date"], "pred_date": o["pred_date"],
+                                      "overnight": o.get("overnight"), "model": o["model"], "top": top})
     # latest prediction
-    preds = sorted(PRED_DIR.glob("*.json"))
+    preds = sorted(p for p in PRED_DIR.glob("*.json") if not p.name.startswith("preopen_"))
     if preds:
         o = json.loads(preds[-1].read_text())
         top = []
         for r in o["predictions"][: o["top_n"]]:
-            top.append({k: r[k] for k in ("rank", "code", "name", "industry", "prob", "close", "r1")} |
+            top.append({k: r.get(k) for k in ("rank", "code", "name", "industry", "prob", "close", "r1", "limitup")} |
                        {"pos": [f"{f['label']} {f['value_str']}" for f in r["factors_pos"][:3]],
                         "neg": [f"{f['label']} {f['value_str']}" for f in r["factors_neg"][:2]]})
         _dump("latest_prediction.json", {"pred_date": o["pred_date"], "target_date": o["target_date"],
                                          "universe_size": o["universe_size"], "market": o["market"],
-                                         "model": o["model"], "top": top,
+                                         "model": o["model"], "top": top, "overnight": o.get("overnight"),
                                          "history": [p.stem for p in preds][-60:]})
     # latest review (parse structured data from logs)
     reviews = sorted((REPORT_DIR / "review").glob("review_*.md"))
@@ -140,7 +157,7 @@ def build():
     rep.mkdir(parents=True, exist_ok=True)
     for sub in ("predict", "review"):
         (rep / sub).mkdir(exist_ok=True)
-        for f in sorted((REPORT_DIR / sub).glob("*.md"))[-60:]:
+        for f in sorted((REPORT_DIR / sub).glob("*.md"))[-90:]:
             shutil.copy2(f, rep / sub / f.name)
     for f in ("validation.md", "error_patterns.md"):
         if (REPORT_DIR / f).exists():

@@ -27,6 +27,18 @@
 所有請求都有間隔（證交所約 3.2 秒/次，櫃買 2 秒/次，觀測站 3 秒/次），避免被封鎖。
 資料存於 SQLite：`data/tw.db`。
 
+### 1b. 期貨、國際股市、事件風險（新增）
+| 類別 | 來源 | 備註 |
+|---|---|---|
+| 台指期日/夜盤、基差 | 期交所 `futDataDown`（一般/盤後） | 2024-06 起；夜盤只給盤前模型 |
+| 期貨三大法人未平倉 | 期交所 `futContractsDateDown` | 外資/投信淨 OI 與變化 |
+| P/C 比 | 期交所 `pcRatioDown` | |
+| 國際股市/總經 | Yahoo chart API：日經、KOSPI、恆生、上證(000001.SS，CSI300 抓不到)、DAX、STOXX50、ES/NQ 期貨、USD/TWD、US10Y、DXY、原油、黃金、VIX | 亞股用當日收盤；歐美用前一日（盤前模型用當日） |
+| 地緣政治/突發事件 | GDELT 1.0 每日事件檔（doc API 對本機 IP 一直限流，改用事件檔） | 中台、戰爭、制裁關稅、緊急事件的報導占比與語調；只用 < t 的檔案 |
+| 地震 | USGS fdsnws（台灣附近 M≥5） | 完整歷史 |
+| 中文新聞量 | Google News RSS zh-TW 關鍵字 | 歷史每次上限 100 則，粗略；只用前一日 |
+| 颱風 | 氣象署 API 拒絕存取 | **未使用**；只能靠新聞量與休市日間接反映 |
+
 ## 2. 安裝
 
 ```bash
@@ -49,6 +61,16 @@ $PY -m twq review                               # 檢討所有「目標日已有
 $PY -m twq review --date 2026-10-15             # 指定檢討 10/15 產生的預測
 ./run_daily.sh                                  # 每日一鍵：更新 → 檢討 → 預測
 ```
+
+### 盤前更新（`twq preopen`）
+```bash
+python -m twq preopen                 # 下一交易日，抓夜盤/美股/匯率/地震後重新評分
+python -m twq preopen --limitup penalize   # flag(預設)/penalize/exclude 前日漲停股
+python -m twq ablation --start 2025-03-01  # 特徵組比較，寫入 reports/validation.md
+```
+建議排程：台灣 07:15（夜盤 05:00 收、美股已收）＝ **波哥大前一日 18:15（週日～週四）**：
+`15 18 * * 0-4 /workspace/tw-quant/run_preopen.sh`。
+預測目標為「開盤→收盤」相對強弱，才是可實際執行的版本。
 
 ### 每日排程
 
@@ -126,6 +148,9 @@ run_daily.sh                  每日一鍵流程
 - 產業別使用目前的分類，歷史上若有變更會有些微誤差；下市股票的歷史仍在資料中，但產業可能顯示「未知」。
 - 新聞判讀只用標題關鍵字，可能誤判；檢討報告會附上標題讓你自行判斷。
 - 交易成本以手續費 6 折、證交稅 0.3% 估算，未計滑價與漲停買不到。
+
+- 新增的期貨/國際/事件特徵是否有用，請看 `reports/validation.md` 的 Ablation 表；結果誠實列出，沒有勝過大盤就是沒有。
+- 事件資料是粗略代理：GDELT 報導量與 Google News 計數不等於事件嚴重度，新聞量歷史不完整。
 
 ## 8. 網站（GitHub Pages）
 

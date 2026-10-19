@@ -17,10 +17,10 @@ N_ROUNDS = 300
 COST_ROUNDTRIP = 0.001425 * 2 * 0.6 + 0.003  # 手續費(6折)x2 + 證交稅0.3%
 
 
-def train(X: pd.DataFrame, feats=None):
+def train(X: pd.DataFrame, feats=None, label="y"):
     feats = feats or F.FEATURES
-    d = X[X.y.notna()]
-    ds = lgb.Dataset(d[feats], label=d["y"])
+    d = X[X[label].notna()]
+    ds = lgb.Dataset(d[feats], label=d[label])
     return lgb.train(PARAMS, ds, num_boost_round=N_ROUNDS)
 
 
@@ -30,7 +30,8 @@ def contributions(booster, Xp: pd.DataFrame, feats=None):
     return pd.DataFrame(c[:, :-1], index=Xp.index, columns=feats), c[:, -1]
 
 
-def walk_forward(X, min_train_days=250, step=21, start=None):
+def walk_forward(X, min_train_days=250, step=21, start=None, feats=None, label="y", verbose=True):
+    feats = feats or F.FEATURES
     days = sorted(X.index.get_level_values("date").unique())
     lab_days = [d for d in days if X.loc[d].y.notna().any()]
     first = min_train_days if start is None else max(min_train_days // 2, next(i for i, d in enumerate(lab_days) if d >= start))
@@ -40,12 +41,15 @@ def walk_forward(X, min_train_days=250, step=21, start=None):
         test_days = lab_days[i:i + step]
         tr = X.loc[train_days[0]:train_days[-1]]
         te = X.loc[test_days[0]:test_days[-1]]
-        b = train(tr)
-        p = b.predict(te[F.FEATURES])
-        o = te[["next_ret", "next_oc", "next_mkt", "next_excess", "next_xs", "y"]].copy()
+        b = train(tr, feats, label)
+        p = b.predict(te[feats])
+        o = te[["next_ret", "next_oc", "next_mkt", "next_excess", "next_xs", "y", "y_oc"]].copy()
+        o["y_cc"] = o["y"]
+        o["y"] = te[label]
         o["prob"] = p
         out.append(o)
-        print(f"  fold train {train_days[0]}~{train_days[-1]} ({len(tr)}) test {test_days[0]}~{test_days[-1]}", flush=True)
+        if verbose:
+            print(f"  fold train {train_days[0]}~{train_days[-1]} ({len(tr)}) test {test_days[0]}~{test_days[-1]}", flush=True)
     return pd.concat(out), b
 
 
@@ -70,6 +74,11 @@ def metrics(oos: pd.DataFrame, top=TOP_N):
     res[f"top{top}_precision_abs_up"] = float((tp.next_ret > 0).mean())
     res["universe_abs_up_rate"] = float((o.next_ret > 0).mean())
     res[f"top{top}_avg_excess_bp"] = float(tp.next_excess.mean() * 1e4)
+    res["auc_oc"] = float(roc_auc_score(o.y_oc.dropna(), o.prob[o.y_oc.notna()])) if "y_oc" in o else None
+    res[f"top{top}_oc_beat_median"] = float((tp.y_oc > 0).mean()) if "y_oc" in tp else None
+    res[f"top{top}_oc_up"] = float((tp.next_oc > 0).mean())
+    res[f"top{top}_avg_oc_bp"] = float(tp.next_oc.mean() * 1e4)
+    res["universe_avg_oc_bp"] = float(o.next_oc.mean() * 1e4)
     o["dec"] = o.groupby(level="date").prob.transform(lambda s: pd.qcut(s.rank(method="first"), 10, labels=False))
     dec = o.groupby("dec").next_excess.mean() * 1e4
     res["decile_avg_excess_bp"] = {int(k): round(float(v), 1) for k, v in dec.items()}
@@ -115,7 +124,7 @@ def validate(start=None):
                                                       f"top{TOP_N}_avg_excess_bp")}
     res["baseline_reversal"]["cum_ret_top_open2close_net"] = bres["backtest"]["cum_ret_top_open2close_net"]
     res["baseline_reversal"]["cum_ret_top_close2close_gross"] = bres["backtest"]["cum_ret_top_close2close_gross"]
-    imp = pd.Series(last_model.feature_importance("gain"), index=F.FEATURES).sort_values(ascending=False)
+    imp = pd.Series(last_model.feature_importance("gain"), index=last_model.feature_name()).sort_values(ascending=False)
     res["top_features_gain"] = {k: round(float(v), 1) for k, v in imp.head(15).items()}
     res["generated"] = dt.datetime.now().isoformat(timespec="seconds")
     (MODEL_DIR / "validation.json").write_text(json.dumps(res, ensure_ascii=False, indent=2))
@@ -183,4 +192,64 @@ def _write_md(res):
     ]
     for k, v in res["top_features_gain"].items():
         lines.append(f"- {k}（{F.label(k)}，{F.category(k)}）：{v}")
-    (REPORT_DIR / "validation.md").write_text("\n".join(lines) + "\n")
+    (REPORT_DIR / "validation.md").write_text("\n".join(lines) + "\n" + ablation_md())
+
+
+def ablation(start="2025-03-01", step=42, sets=None, labels=("y_oc", "y")):
+    """Compare feature sets with identical walk-forward splits. Checkpoints to models/ablation.json."""
+    X = F.build()
+    path = MODEL_DIR / "ablation.json"
+    done = json.loads(path.read_text()) if path.exists() else {}
+    for label in labels:
+        for name, feats in (sets or F.FEATURE_SETS).items():
+            key = f"{name}|{label}"
+            if key in done:
+                continue
+            oos, b = walk_forward(X, step=step, start=start, feats=feats, label=label, verbose=False)
+            r, daily, eq, ic = metrics(oos)
+            imp = pd.Series(b.feature_importance("gain"), index=b.feature_name()).sort_values(ascending=False)
+            done[key] = {"set": name, "label": label, "n_features": len(feats), "test_period": r["test_period"],
+                         "n_days": r["n_days"], "auc": r["auc"], "auc_cc": r["auc_vs_taiex_excess"],
+                         "auc_oc": r["auc_oc"], "rank_ic": r["rank_ic_mean"],
+                         "top_prec_excess_cc": r[f"top{TOP_N}_precision_excess"],
+                         "top_oc_beat_median": r[f"top{TOP_N}_oc_beat_median"], "top_oc_up": r[f"top{TOP_N}_oc_up"],
+                         "top_avg_oc_bp": r[f"top{TOP_N}_avg_oc_bp"], "universe_avg_oc_bp": r["universe_avg_oc_bp"],
+                         "cum_oc_gross": r["backtest"]["cum_ret_top_open2close_gross"],
+                         "cum_oc_net": r["backtest"]["cum_ret_top_open2close_net"],
+                         "cum_cc_gross": r["backtest"]["cum_ret_top_close2close_gross"],
+                         "cum_taiex": r["backtest"]["cum_ret_taiex"],
+                         "top_features": list(imp.head(8).index)}
+            daily.join(eq.add_suffix("_equity")).to_csv(MODEL_DIR / f"ablation_daily_{name}_{label}.csv")
+            path.write_text(json.dumps(done, ensure_ascii=False, indent=1))
+            print(key, {k: done[key][k] for k in ("auc", "auc_oc", "top_avg_oc_bp", "cum_oc_net")}, flush=True)
+    vm = REPORT_DIR / "validation.md"
+    if vm.exists():
+        txt = vm.read_text().split("\n## 特徵組比較")[0].rstrip("\n") + "\n"
+        vm.write_text(txt + ablation_md())
+    return done
+
+
+SET_NAMES = {"base": "基本（技術+籌碼+大盤+美股前一晚+營收）", "+futures": "＋期貨（台指期/外資未平倉/P-C）",
+             "+global": "＋國際股市（日韓港陸歐、美股期貨、匯率利率原油黃金）",
+             "+events": "＋事件風險（GDELT 地緣政治、中文新聞量、地震、產業交互作用）",
+             "all_base": "全部（收盤後可得）", "preopen": "全部＋盤前（台指期夜盤、當晚美股、隔夜事件）"}
+
+
+def ablation_md():
+    path = MODEL_DIR / "ablation.json"
+    if not path.exists():
+        return ""
+    d = json.loads(path.read_text())
+    pct = lambda x: "NA" if x is None else f"{x * 100:+.1f}%"
+    L = ["", "## 特徵組比較（Ablation，相同 walk-forward 切分）", ""]
+    any_ = next(iter(d.values()))
+    L.append(f"測試期 {any_['test_period'][0]} ~ {any_['test_period'][1]}（{any_['n_days']} 個交易日），每 42 個交易日重新訓練。"
+             "「目標」y＝收盤→隔日收盤跑贏中位數；y_oc＝隔日開盤→收盤跑贏中位數（盤前可執行）。"
+             "可執行回測一律為「隔日開盤買、收盤賣」，扣手續費（6折）與證交稅。")
+    L += ["", "| 特徵組 | 目標 | 特徵數 | AUC(自身目標) | AUC(開→收) | Rank IC | Top-10 開→收平均(bp) | 全體開→收平均(bp) | Top-10 開→收上漲比例 | 開→收累積(毛) | 開→收累積(扣成本) | 加權指數 |",
+          "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    for k, r in d.items():
+        L.append(f"| {SET_NAMES.get(r['set'], r['set'])} | {r['label']} | {r['n_features']} | {r['auc']:.4f} | {r['auc_oc']:.4f} | "
+                 f"{r['rank_ic']:.4f} | {r['top_avg_oc_bp']:.1f} | {r['universe_avg_oc_bp']:.1f} | {r['top_oc_up'] * 100:.1f}% | "
+                 f"{pct(r['cum_oc_gross'])} | {pct(r['cum_oc_net'])} | {pct(r['cum_taiex'])} |")
+    return "\n".join(L) + "\n"
