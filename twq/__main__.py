@@ -70,6 +70,11 @@ def main(argv=None):
             fetch_ext.update(end - dt.timedelta(days=args.days), end)
         except Exception as e:  # extra data must never break the daily pipeline
             print("extra data update failed:", e)
+        try:
+            from . import flows
+            flows.update(end - dt.timedelta(days=args.days), end)
+        except Exception as e:
+            print("flow data update failed:", e)
     elif args.cmd == "validate":
         from . import model
         model.validate(args.start)
