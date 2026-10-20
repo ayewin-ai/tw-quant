@@ -19,6 +19,8 @@ $PY -m twq update --end "$TWDATE" --days 10 || echo "更新發生錯誤（繼續
 echo "--- [2/5] 檢討尚未檢討、且目標日已有資料的預測"
 $PY -m twq review --no-update || echo "檢討失敗"
 
+echo "--- [2b] 依檢討結果自動調權（twq tune，有防過擬合門檻）"
+timeout 900 $PY -m twq tune || echo "自動調權失敗或逾時（沿用現行 config/weights.json）"
 echo "--- [3/5] 預測下一交易日"
 if $PY -m twq has-data --date "$TWDATE"; then
   $PY -m twq predict --date "$TWDATE" --no-update
@@ -30,8 +32,8 @@ $PY -m twq site || echo "網站資料產生失敗"
 echo "--- [5/5] 推送網站更新到 GitHub"
 if [[ -n "${TWQ_NOPUSH:-}" ]]; then
   echo "TWQ_NOPUSH 已設定：略過 commit/push（dry-run）"
-elif [[ -n "$(git status --porcelain docs reports models/validation.json)" ]]; then
-  git add docs reports models/validation.json && git commit -q -m "daily update ${TWDATE}" && git push -q origin main && echo "已推送" || echo "推送失敗"
+elif [[ -n "$(git status --porcelain docs reports models/validation.json config)" ]]; then
+  git add docs reports models/validation.json config && git commit -q -m "daily update ${TWDATE}" && git push -q origin main && echo "已推送" || echo "推送失敗"
 else
   echo "沒有變更，不推送"
 fi

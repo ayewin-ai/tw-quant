@@ -15,7 +15,7 @@
   <p class="sub">用免費公開資料，每天預測隔日強勢股、隔天自動檢討錯在哪裡</p>
   <nav>
     <a href="#honest">誠實結論</a><a href="#data">資料取得</a><a href="#features">特徵</a><a href="#algo">演算法</a>
-    <a href="#extdata">期貨/國際/事件</a><a href="#loop">每日流程</a><a href="#ablation">特徵比較</a><a href="#preopen">盤前更新</a><a href="#predhist">每日預測 vs 實際</a><a href="#results">驗證與曲線</a><a href="#latest">最新預測</a><a href="#review">最新檢討</a>
+    <a href="#extdata">期貨/國際/事件</a><a href="#loop">每日流程</a><a href="#ablation">特徵比較</a><a href="#preopen">盤前更新</a><a href="#predhist">每日預測 vs 實際</a><a href="#tuning">模型調整</a><a href="#results">驗證與曲線</a><a href="#latest">最新預測</a><a href="#review">最新檢討</a>
     <a href="#reports">報告</a>
   </nav>
 </header>
@@ -190,6 +190,19 @@
     <div class="chartbox"><canvas id="phStack"></canvas></div>
   </div>
   <div id="phTable" class="scroll"></div>
+</section>
+
+<section id="tuning">
+  <h2>6d. 模型自動調整（每日檢討 → 調權）</h2>
+  <p class="muted">每天檢討後，<code>twq tune</code> 依常見誤判原因產生幾個小幅調整候選，用近 90 個交易日的 walk-forward 比較；
+  只有在「開→收扣成本」改善 ≥ 3 bp/日、Top-10 超額與 AUC 沒有明顯變差、且前後半段都改善時才採用，每天最多一項。
+  上線後 10 日若明顯變差會自動回滾。完整紀錄：<code>reports/tuning_log.csv</code>、<code>reports/CHANGELOG_model.md</code>。</p>
+  <div id="tuneCurrent"></div>
+  <div class="grid2">
+    <div class="chartbox"><canvas id="tuneMetric"></canvas></div>
+    <div class="chartbox"><canvas id="tuneWeights"></canvas></div>
+  </div>
+  <div id="tuneTable" class="scroll"></div>
 </section>
 
 <section id="latest">

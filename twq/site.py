@@ -125,6 +125,26 @@ def build():
                                         "rows": c.astype(object).where(c.notna(), None).values.tolist()})
     except Exception as e:
         print("pred_history error", e)
+    try:
+        from . import tune, weights as W
+        if tune.LOG.exists():
+            lg = pd.read_csv(tune.LOG)
+            ch = lg[lg.decision == "champion"].drop_duplicates("date", keep="last")
+            keys = ["score.limitup_penalty", "score.gap_risk_penalty", "score.max_per_industry",
+                    "liquidity_min_avg_value", "recency_half_life_days"]
+            hist = []
+            for r in ch.itertuples():
+                f = W.HIST / f"weights_v{int(r.version_before)}.json"
+                ww = json.loads(f.read_text()) if f.exists() else W.load()
+                hist.append({"date": r.date, "version": int(r.version_before), "net_oc_bp": r.net_oc_bp,
+                             "excess_bp": r.excess_bp, "auc_oc": r.auc_oc, **{k: W.get(ww, k) for k in keys}})
+            dec = lg[lg.decision != "champion"].tail(40).iloc[::-1]
+            _dump("tuning.json", {"history": hist, "keys": keys,
+                                  "decisions": dec[["date", "decision", "key", "old", "new", "reason"]].astype(object)
+                                  .where(dec[["date", "decision", "key", "old", "new", "reason"]].notna(), None).to_dict("records"),
+                                  "current": W.load()})
+    except Exception as e:
+        print("tuning site data error", e)
     # latest prediction
     preds = sorted(p for p in PRED_DIR.glob("*.json") if not p.name.startswith("preopen_"))
     if preds:

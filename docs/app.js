@@ -15,6 +15,8 @@ window.charts = {};
   if (pre) renderPreopen(pre);
   const ph = await J('pred_history.json');
   if (ph) renderPredHistory(ph);
+  const tu = await J('tuning.json');
+  if (tu) renderTuning(tu);
   window.siteData = {meta, val, eq, hit, live, err, lp, lr};
   if (meta) {
     $('gen').textContent = `資料更新：${meta.generated_at} (UTC)`;
@@ -240,4 +242,30 @@ function renderPredHistory(ph) {
     $('phTable').querySelectorAll('th').forEach(th => th.onclick = () => { const k = th.dataset.k; asc = k === sortK ? !asc : false; sortK = k; draw(); });
   };
   draw();
+}
+
+
+function renderTuning(t) {
+  const c = t.current, sc = c.score || {};
+  $('tuneCurrent').innerHTML = `<p>現行版本 <b>v${c.version}</b>（${c.updated}）：特徵組 ${c.feature_set}、樣本時間衰減半衰期 ${c.recency_half_life_days ?? '不衰減'}、
+    漲停扣分 ${sc.limitup_penalty}、前日大漲扣分 ${sc.gap_risk_penalty}、同產業上限 ${sc.max_per_industry}、流動性門檻 ${(c.liquidity_min_avg_value / 1e8).toFixed(1)} 億、
+    LightGBM：leaves ${c.model.num_leaves}、min_child ${c.model.min_child_samples}、rounds ${c.model.num_rounds}</p>`;
+  const H = t.history, D = H.map(h => h.date);
+  const L = (label, data, color, axis = 'y') => ({label, data, borderColor: color, backgroundColor: color, pointRadius: 3, borderWidth: 2, yAxisID: axis, stepped: axis === 'w'});
+  charts.tuneMetric = new Chart($('tuneMetric'), {type: 'line', data: {labels: D, datasets: [
+    L('冠軍設定 開→收扣成本 (bp/日)', H.map(h => h.net_oc_bp), '#3ddc97'),
+    L('冠軍設定 Top-10 超額 (bp/日)', H.map(h => h.excess_bp), '#4fa3ff'),
+    L('AUC(開→收)', H.map(h => h.auc_oc), '#ffd166', 'a')]},
+    options: {responsive: true, maintainAspectRatio: false, plugins: {title: {display: true, text: '冠軍設定近 90 日樣本外表現（每日重算）'}},
+      scales: {y: {position: 'left'}, a: {position: 'right', grid: {drawOnChartArea: false}}}}});
+  const colors = ['#ff6b6b', '#c084fc', '#4fa3ff', '#3ddc97', '#ffd166'];
+  const lab = {'score.limitup_penalty': '漲停扣分', 'score.gap_risk_penalty': '前日大漲扣分', 'score.max_per_industry': '同產業上限',
+    'liquidity_min_avg_value': '流動性門檻(億)', 'recency_half_life_days': '半衰期(百日)'};
+  const scale = k => k === 'liquidity_min_avg_value' ? 1e-8 : k === 'recency_half_life_days' ? 0.01 : 1;
+  charts.tuneWeights = new Chart($('tuneWeights'), {type: 'line', data: {labels: D, datasets:
+    t.keys.map((k, i) => L(lab[k] || k, H.map(h => h[k] == null ? 0 : h[k] * scale(k)), colors[i % 5], 'w'))},
+    options: {responsive: true, maintainAspectRatio: false, plugins: {title: {display: true, text: '主要權重隨時間變化'}}, scales: {w: {position: 'left'}}}});
+  const icon = {accepted: '✅ 採用', rejected: '❌ 不採用', candidate_ok: '🟡 通過但非最佳', rollback: '⏪ 回滾'};
+  $('tuneTable').innerHTML = `<table><tr><th>日期</th><th>結果</th><th>參數</th><th>舊</th><th>新</th><th>理由</th></tr>
+    ${t.decisions.map(d => `<tr><td>${d.date}</td><td>${icon[d.decision] || d.decision}</td><td><code>${d.key || ''}</code></td><td>${d.old ?? ''}</td><td>${d.new ?? ''}</td><td>${d.reason || ''}</td></tr>`).join('')}</table>`;
 }

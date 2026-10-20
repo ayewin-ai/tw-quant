@@ -185,18 +185,32 @@ def _log(rows):
     df.to_csv(LOG, mode="a", header=not LOG.exists(), index=False)
 
 
+HEAD = ("# 模型調整紀錄（CHANGELOG）\n\n"
+        "自動調權（`twq tune`）與程式修正（commit 訊息前綴 `auto-fix:`）都記在這裡，最新在最上面。"
+        "本紀錄僅供研究，不構成投資建議。\n\n<!-- entries -->\n")
+
+
 def _changelog(lines):
-    head = "# 模型調整紀錄（CHANGELOG）\n\n自動調權（`twq tune`）與程式修正（commit 前綴 `auto-fix:`）都記在這裡。最新在最上面。\n\n"
-    old = CHANGELOG.read_text().split("\n", 4)[-1] if CHANGELOG.exists() else ""
-    if CHANGELOG.exists() and old.startswith("自動調權"):
-        old = ""
-    body = CHANGELOG.read_text()[len(head):] if CHANGELOG.exists() and CHANGELOG.read_text().startswith(head) else ""
-    CHANGELOG.write_text(head + "\n".join(lines) + "\n\n" + body)
+    body = ""
+    if CHANGELOG.exists():
+        t = CHANGELOG.read_text()
+        body = t.split("<!-- entries -->\n", 1)[1] if "<!-- entries -->\n" in t else t
+    CHANGELOG.write_text(HEAD + "\n".join(lines) + "\n\n" + body)
+
+
+def record_fix(summary, files=""):
+    """Used by the daily routine agent after an `auto-fix:` commit."""
+    _changelog([f"## {dt.date.today().isoformat()} 程式修正（auto-fix）", "", f"- {summary}" + (f"（{files}）" if files else "")])
 
 
 def run(dry=False):
     t0 = time.time()
     today = dt.date.today().isoformat()
+    if not dry and LOG.exists():
+        lg = pd.read_csv(LOG)
+        if ((lg.date == today) & lg.decision.isin(["champion"])).any():
+            print(f"今天（{today}）已經調整/評估過，略過（每日最多一次）。", flush=True)
+            return []
     w = W.load()
     if not W.PATH.exists():
         W.save(w)
@@ -210,7 +224,7 @@ def run(dry=False):
              "version_after": w["version"], **{k: round(v, 4) if isinstance(v, float) else v for k, v in champ.items()},
              "reason": f"現行版本 v{w['version']} 近 {champ['days']} 日樣本外表現"}]
     md = [f"## {today}（v{w['version']}）", "",
-          f"- 檢視近 {f['n_days']} 次檢討：誤判原因 " + ("、".join(f"{k}×{v}" for k, v in list(f["causes"].items())[:6]) or "無") +
+          f"- 檢視近 {f['n_days']} 次檢討{'（樣本仍少，只用來挑候選；是否採用一律看近 ' + str(EVAL_DAYS) + ' 日 walk-forward）' if f['n_days'] < 10 else ''}：誤判原因 " + ("、".join(f"{k}×{v}" for k, v in list(f["causes"].items())[:6]) or "無") +
           f"；收盤後名單近期 跳空 {f.get('gap_bp') or 0:+.0f} bp / 盤中 {f.get('intraday_bp') or 0:+.0f} bp",
           f"- 現行版本樣本外（{champ['period']}，{champ['days']} 日）：開→收扣成本 {champ['net_oc_bp']:+.1f} bp/日、"
           f"Top-10 超額 {champ['excess_bp']:+.1f} bp/日、AUC(開→收) {champ['auc_oc']:.4f}"]
