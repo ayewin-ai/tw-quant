@@ -156,8 +156,17 @@ def update_vs_actual(top_n=10):
                      "rank_ic": d.prob.corr(r, method="spearman")})
     if sums:
         s = pd.DataFrame(sums).round(5)
-        s.to_csv(SUMMARY, mode="a", header=not SUMMARY.exists(), index=False)
+        if SUMMARY.exists():  # append-only, but never append a (kind, pred_date) that is already recorded
+            have = set(map(tuple, pd.read_csv(SUMMARY, usecols=["kind", "pred_date"], dtype=str).values))
+            s = s[[(k, d) not in have for k, d in zip(s.kind, s.pred_date)]]
+        if not s.empty:
+            s.to_csv(SUMMARY, mode="a", header=not SUMMARY.exists(), index=False)
     return added
+
+
+def read_summary():
+    """daily_summary.csv with one row per (kind, pred_date): older runs appended some days twice; keep the first."""
+    return pd.read_csv(SUMMARY).drop_duplicates(["kind", "pred_date"], keep="first")
 
 
 def gzip_old(keep_days=7):
@@ -184,7 +193,7 @@ def write_comparison():
     from .model import COST_ROUNDTRIP
     if not SUMMARY.exists():
         return None
-    s = pd.read_csv(SUMMARY).drop_duplicates(["kind", "pred_date"], keep="first")
+    s = read_summary()
     cols = {"top_up": "top10_up", "top_beat": "top10_beat", "top_beat_taiex_cc": "top10_beat_taiex",
             "top_avg_ret": "top10_avg_ret", "top_avg_excess": "top10_avg_excess", "auc": "auc", "rank_ic": "rank_ic",
             "top_avg_gap": "top10_gap", "top_avg_ret_oc": "top10_intraday", "top_avg_ret_cc": "top10_total",

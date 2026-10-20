@@ -163,7 +163,8 @@ def rollback_check(w):
         return None
     last = acc.iloc[-1]
     try:
-        s = pd.read_csv(REPORT_DIR / "archive" / "daily_summary.csv")
+        from .archive import read_summary
+        s = read_summary()  # dedupe (kind, pred_date) so the rollback window counts each day once
     except Exception:
         return None
     s = s[s.kind == "close"].sort_values("pred_date")

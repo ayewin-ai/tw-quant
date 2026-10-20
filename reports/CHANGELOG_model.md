@@ -3,6 +3,12 @@
 自動調權（`twq tune`）與程式修正（commit 訊息前綴 `auto-fix:`）都記在這裡，最新在最上面。本紀錄僅供研究，不構成投資建議。
 
 <!-- entries -->
+## 2026-10-20 auto-fix：daily_summary 重複列
+
+- 問題：`reports/archive/daily_summary.csv` 中 2026-10-15、2026-10-16 的收盤後名單各被附加了兩次。網站比較表（daily_comparison）原本就有去重，不受影響；但 `twq tune` 的「上線後回滾」檢查直接讀原始檔，重複列會讓「上線前/後 N 日」的視窗少算實際天數。
+- 修正：`archive.update_vs_actual` 附加摘要前先略過已存在的 (kind, pred_date)；新增 `archive.read_summary()`（依 (kind, pred_date) 去重、保留第一筆），`write_comparison` 與 `tune` 的回滾檢查都改用它。歷史資料一筆都沒刪，原始檔維持 append-only。
+- 驗證：重跑 archive，daily_comparison.csv 內容完全相同；模型與權重未變動，驗證指標不受影響。
+
 ## 2026-10-20（v1）
 
 - 檢視近 3 次檢討（樣本仍少，只用來挑候選；是否採用一律看近 90 日 walk-forward）：誤判原因 新聞/事件×6、大盤系統性×6、國際股市×6、美股隔夜×5、產業輪動×5、籌碼反轉×4；收盤後名單近期 跳空 +120 bp / 盤中 -54 bp
