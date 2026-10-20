@@ -14,7 +14,7 @@
   <p class="sub">用免費公開資料，每天預測隔日強勢股、隔天自動檢討錯在哪裡</p>
   <nav>
     <a href="#honest">誠實結論</a><a href="#data">資料取得</a><a href="#features">特徵</a><a href="#algo">演算法</a>
-    <a href="#extdata">期貨/國際/事件</a><a href="#loop">每日流程</a><a href="#ablation">特徵比較</a><a href="#preopen">盤前更新</a><a href="#results">驗證與曲線</a><a href="#latest">最新預測</a><a href="#review">最新檢討</a>
+    <a href="#extdata">期貨/國際/事件</a><a href="#loop">每日流程</a><a href="#ablation">特徵比較</a><a href="#preopen">盤前更新</a><a href="#predhist">每日預測 vs 實際</a><a href="#results">驗證與曲線</a><a href="#latest">最新預測</a><a href="#review">最新檢討</a>
     <a href="#reports">報告</a>
   </nav>
 </header>
@@ -160,6 +160,18 @@
 <section id="preopen">
   <h2>6b. 最新盤前更新預測</h2>
   <div id="latestPreopen"><p class="muted">尚無盤前更新。</p></div>
+</section>
+
+<section id="predhist">
+  <h2>6c. 每日預測 vs 實際結果（自動累積，永久保存）</h2>
+  <p class="muted">每天的收盤後名單（收盤→隔日收盤，對加權指數）與盤前名單（開盤→收盤，對全體平均；淨值扣成本）。
+  原始逐檔資料：<code>reports/archive/</code>（prediction_vs_actual/、daily_comparison.csv）。點欄位標題可排序。</p>
+  <div class="chartbox"><canvas id="phCum"></canvas></div>
+  <div class="grid2">
+    <div class="chartbox"><canvas id="phHit"></canvas></div>
+    <div class="chartbox"><canvas id="phAuc"></canvas></div>
+  </div>
+  <div id="phTable" class="scroll"></div>
 </section>
 
 <section id="latest">

@@ -51,6 +51,7 @@ def main(argv=None):
     a.add_argument("--no-news", action="store_true")
 
     sub.add_parser("status", help="資料庫狀態")
+    sub.add_parser("archive", help="封存所有預測並補上隔日實際結果 (reports/archive，只追加不覆寫)")
     sub.add_parser("site", help="重建網站資料 docs/data/*.json")
     a = sub.add_parser("has-data", help="DATE 是否已有收盤資料 (exit 0=有, 1=無)")
     a.add_argument("--date", default=None)
@@ -83,6 +84,9 @@ def main(argv=None):
     elif args.cmd == "review":
         from . import review
         review.run(parse_date(args.date), update=not args.no_update, news=not args.no_news)
+    elif args.cmd == "archive":
+        from . import archive
+        archive.run()
     elif args.cmd == "site":
         from . import site
         site.build()

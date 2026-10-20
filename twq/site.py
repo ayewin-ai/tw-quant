@@ -116,6 +116,15 @@ def build():
                {"pos": [f"{f['label']} {f['value_str']}" for f in r["factors_pos"][:3]]} for r in o["predictions"][: o["top_n"]]]
         _dump("latest_preopen.json", {"target_date": o["target_date"], "pred_date": o["pred_date"],
                                       "overnight": o.get("overnight"), "model": o["model"], "top": top})
+    try:
+        from . import archive
+        comp = archive.write_comparison()
+        if comp is not None:
+            c = comp.reset_index()
+            _dump("pred_history.json", {"columns": list(c.columns),
+                                        "rows": c.astype(object).where(c.notna(), None).values.tolist()})
+    except Exception as e:
+        print("pred_history error", e)
     # latest prediction
     preds = sorted(p for p in PRED_DIR.glob("*.json") if not p.name.startswith("preopen_"))
     if preds:

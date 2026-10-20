@@ -103,6 +103,11 @@ def run(date: dt.date = None, update=True, top=None, limitup=None):
     out = score(X, ds, target, booster, meta, top, limitup)
     PRED_DIR.mkdir(parents=True, exist_ok=True)
     (PRED_DIR / f"{ds}.json").write_text(json.dumps(out, ensure_ascii=False, indent=1))
+    try:
+        from . import archive
+        archive.archive_prediction(PRED_DIR / f"{ds}.json")
+    except Exception as e:
+        print("archive error", e)
     md = render(out)
     path = PREDICT_REPORT_DIR / f"predict_{ds}.md"
     path.write_text(md)
@@ -187,6 +192,11 @@ def run_preopen(target: dt.date = None, update=True, top=None, limitup=None):
     if out["overnight"].get("tx_night_ret") is None:
         print("⚠️ 尚未取得台指期夜盤資料（夜盤約台灣 05:00 結束），夜盤特徵為缺值。")
     (PRED_DIR / f"preopen_{target.isoformat()}.json").write_text(json.dumps(out, ensure_ascii=False, indent=1))
+    try:
+        from . import archive
+        archive.archive_prediction(PRED_DIR / f"preopen_{target.isoformat()}.json")
+    except Exception as e:
+        print("archive error", e)
     md = render(out)
     path = PREDICT_REPORT_DIR / f"preopen_{target.isoformat()}.md"
     path.write_text(md)

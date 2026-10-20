@@ -159,6 +159,11 @@ def run(pred_date: dt.date = None, update=True, news=True):
                 review_one(stem, tgt, news=news, mode="oc")
             except Exception as e:  # never break the daily pipeline
                 print("盤前名單檢討失敗", stem, e)
+    try:
+        from . import archive
+        archive.run()
+    except Exception as e:
+        print("archive error", e)
 
 
 def classify(kind, s, ctx, drivers, news_items, inst_row):

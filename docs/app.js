@@ -13,6 +13,8 @@ window.charts = {};
   const [abl, pre] = await Promise.all(['ablation.json', 'latest_preopen.json'].map(J));
   if (abl) renderAblation(abl);
   if (pre) renderPreopen(pre);
+  const ph = await J('pred_history.json');
+  if (ph) renderPredHistory(ph);
   window.siteData = {meta, val, eq, hit, live, err, lp, lr};
   if (meta) {
     $('gen').textContent = `資料更新：${meta.generated_at} (UTC)`;
@@ -177,4 +179,48 @@ function renderPreopen(p) {
   <table><tr><th>#</th><th>代號</th><th>名稱</th><th>產業</th><th>機率</th><th>前日漲跌</th><th>主要因素</th></tr>
   ${p.top.map(r => `<tr><td>${r.rank}</td><td>${r.code}</td><td>${r.name}${r.limitup ? ' ⚠️漲停追高' : ''}</td><td>${r.industry}</td><td>${(r.prob * 100).toFixed(1)}%</td>
     <td class="${cls(r.r1)}">${pct(r.r1)}</td><td>${r.pos.join('；')}</td></tr>`).join('')}</table>`;
+}
+
+
+function renderPredHistory(ph) {
+  const rows = ph.rows.map(r => Object.fromEntries(ph.columns.map((c, i) => [c, r[i]])));
+  const D = rows.map(r => r.target_date), v = (r, k) => r[k] == null ? null : r[k];
+  const cum = (k) => { let e = 1; return rows.map(r => { if (r[k] != null) e *= 1 + r[k]; return e - 1; }); };
+  const cumHit = (k) => { let s = 0, n = 0; return rows.map(r => { if (r[k] != null) { s += r[k]; n++; } return n ? s / n : null; }); };
+  const roll = (k, w = 20) => rows.map((_, i) => { const xs = rows.slice(Math.max(0, i - w + 1), i + 1).map(r => r[k]).filter(x => x != null); return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null; });
+  const L = (label, data, color, extra = {}) => ({label, data, borderColor: color, backgroundColor: color, pointRadius: 2, borderWidth: 2, spanGaps: true, ...extra});
+  const opt = (t, pctAxis = true) => ({responsive: true, maintainAspectRatio: false, interaction: {mode: 'index', intersect: false},
+    plugins: {title: {display: true, text: t}}, scales: {y: pctAxis ? {ticks: {callback: x => (x * 100).toFixed(1) + '%'}} : {}}});
+  charts.phCum = new Chart($('phCum'), {type: 'line', data: {labels: D, datasets: [
+    L('收盤後 Top-10 累積超額（收→收，對加權，未扣成本、實務難執行）', cum('close_top10_avg_excess'), '#4fa3ff'),
+    L('盤前 Top-10 累積報酬（開→收，扣成本）', cum('preopen_top10_net_ret'), '#3ddc97'),
+    L('加權指數累積', cum('taiex_ret'), '#ffffff', {borderDash: [6, 4]})]}, options: opt('累積報酬')});
+  charts.phHit = new Chart($('phHit'), {type: 'line', data: {labels: D, datasets: [
+    L('收盤後 上漲比例（累積）', cumHit('close_top10_up'), '#4fa3ff'),
+    L('收盤後 勝過加權（累積）', cumHit('close_top10_beat'), '#a5c8ff', {borderDash: [4, 3]}),
+    L('盤前 上漲比例（累積）', cumHit('preopen_top10_up'), '#3ddc97'),
+    L('盤前 勝過全體平均（累積）', cumHit('preopen_top10_beat'), '#9ff0c8', {borderDash: [4, 3]}),
+    L('收盤後 勝過加權（20日滾動）', roll('close_top10_beat'), '#ffd166', {pointRadius: 0, borderWidth: 1}),
+    L('50%', D.map(() => 0.5), '#888', {pointRadius: 0, borderWidth: 1, borderDash: [2, 2]})]}, options: opt('Top-10 命中率')});
+  charts.phAuc = new Chart($('phAuc'), {type: 'line', data: {labels: D, datasets: [
+    L('收盤後 AUC', rows.map(r => v(r, 'close_auc')), '#4fa3ff'),
+    L('盤前 AUC', rows.map(r => v(r, 'preopen_auc')), '#3ddc97'),
+    L('收盤後 Rank IC', rows.map(r => v(r, 'close_rank_ic')), '#c084fc', {borderDash: [4, 3]}),
+    L('盤前 Rank IC', rows.map(r => v(r, 'preopen_rank_ic')), '#ff6b6b', {borderDash: [4, 3]}),
+    L('AUC 0.5', D.map(() => 0.5), '#888', {pointRadius: 0, borderWidth: 1, borderDash: [2, 2]}),
+    L('IC 0', D.map(() => 0), '#555', {pointRadius: 0, borderWidth: 1, borderDash: [2, 2]})]}, options: opt('每日 AUC / Rank IC', false)});
+  const cols = [['target_date', '目標日', 'd'], ['close_top10_up', '收盤後 上漲比例', 'r'], ['close_top10_beat', '收盤後 勝過加權', 'r'],
+    ['close_top10_avg_ret', '收盤後 平均報酬', 'p'], ['close_top10_avg_excess', '收盤後 平均超額', 'p'], ['close_auc', '收盤後 AUC', 'n'],
+    ['close_rank_ic', '收盤後 Rank IC', 'n'], ['preopen_top10_up', '盤前 上漲比例', 'r'], ['preopen_top10_beat', '盤前 勝過全體', 'r'],
+    ['preopen_top10_avg_ret', '盤前 開→收平均', 'p'], ['preopen_top10_avg_excess', '盤前 超額', 'p'], ['preopen_auc', '盤前 AUC', 'n'],
+    ['preopen_rank_ic', '盤前 Rank IC', 'n'], ['taiex_ret', '加權指數', 'p']];
+  const fmt = (x, t) => x == null ? '—' : t === 'r' ? `${Math.round(x * 100)}%` : t === 'p' ? `<span class="${cls(x)}">${pct(x)}</span>` : t === 'n' ? x.toFixed(3) : x;
+  let sortK = 'target_date', asc = false;
+  const draw = () => {
+    const rs = [...rows].sort((a, b) => { const x = a[sortK], y = b[sortK]; if (x == null) return 1; if (y == null) return -1; return (x < y ? -1 : x > y ? 1 : 0) * (asc ? 1 : -1); });
+    $('phTable').innerHTML = `<table class="sortable"><tr>${cols.map(([k, h]) => `<th data-k="${k}" style="cursor:pointer">${h}${k === sortK ? (asc ? ' ▲' : ' ▼') : ''}</th>`).join('')}</tr>
+      ${rs.map(r => `<tr>${cols.map(([k, , t]) => `<td>${fmt(r[k], t)}</td>`).join('')}</tr>`).join('')}</table>`;
+    $('phTable').querySelectorAll('th').forEach(th => th.onclick = () => { const k = th.dataset.k; asc = k === sortK ? !asc : false; sortK = k; draw(); });
+  };
+  draw();
 }
