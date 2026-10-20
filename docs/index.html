@@ -94,6 +94,17 @@
   </table>
 </section>
 
+<section id="flowdata">
+  <h2>1c. ETF／指數調整、法說會、科技大事件、政府基金（新增）</h2>
+  <table><thead><tr><th>類別</th><th>來源</th><th>特徵</th><th>限制</th></tr></thead><tbody>
+    <tr><td>ETF 持股</td><td>MoneyDJ 每日全部持股（0050、0056、00878、00919、00929、00940、006208、00713…）</td><td>主要 ETF 合計權重、持有檔數</td><td>只有當日快照，無免費歷史 → 不進回測</td></tr>
+    <tr><td>成分股調整</td><td>新聞標題解析＋公開的調整規則（MSCI、台灣50、高股息 ETF）</td><td>已公告納入/剔除（以 ETF 規模加權）、距生效日、生效後 5 日、距 MSCI/台灣50 調整日</td><td>標題解析有雜訊</td></tr>
+    <tr><td>法說會</td><td>公開資訊觀測站 法人說明會</td><td>距法說會天數、法說後天數、個股過去法說前/後 5 日平均超額</td><td>只用 10 天內已公告日期</td></tr>
+    <tr><td>科技大事件</td><td>內建行事曆（台積電法說、輝達/蘋果財報、Apple 發表會、GTC、Computex、CES）</td><td>距事件交易日、各產業過去事件前/後平均超額</td><td>2026 下半年部分日期為估計</td></tr>
+    <tr><td>國家隊/政府基金</td><td>Google News 新聞量（國安基金、八大行庫、勞動/退撫基金）</td><td>前一日新聞量 Z</td><td>無官方日資料；勞動基金只有季/年報</td></tr>
+  </tbody></table>
+</section>
+
 <section id="features">
   <h2>2. 特徵（約 70 個，皆只用收盤後已知資訊）</h2>
   <div class="grid">

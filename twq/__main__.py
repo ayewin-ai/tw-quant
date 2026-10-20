@@ -33,6 +33,7 @@ def main(argv=None):
     a = sub.add_parser("ablation", help="特徵組比較 (base/+futures/+global/+events/all/preopen)")
     a.add_argument("--start", default="2025-03-01")
     a.add_argument("--step", type=int, default=42)
+    a.add_argument("--labels", default="y_oc,y", help="逗號分隔，例如 y_oc")
 
     a = sub.add_parser("predict", help="以 DATE 收盤資料預測下一交易日")
     a.add_argument("--date", default=None)
@@ -74,7 +75,7 @@ def main(argv=None):
         model.validate(args.start)
     elif args.cmd == "ablation":
         from . import model
-        model.ablation(args.start, args.step)
+        model.ablation(args.start, args.step, labels=tuple(args.labels.split(",")))
     elif args.cmd == "predict":
         from . import predict
         predict.run(parse_date(args.date), update=not args.no_update, top=args.top, limitup=args.limitup)
