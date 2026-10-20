@@ -171,6 +171,12 @@
     <div class="chartbox"><canvas id="phHit"></canvas></div>
     <div class="chartbox"><canvas id="phAuc"></canvas></div>
   </div>
+  <h3>隔日開盤 vs 收盤：報酬拆解</h3>
+  <p class="muted">總報酬（收→收）＝ 跳空（前日收盤→隔日開盤）× 盤中（開盤→收盤）。基準用 0050（加權指數沒有可交易的開盤價）。收盤後名單若只有「跳空」賺錢，代表優勢在收盤後才拿得到的隔夜資訊，實務上買不到。</p>
+  <div class="grid2">
+    <div class="chartbox"><canvas id="phSplit"></canvas></div>
+    <div class="chartbox"><canvas id="phStack"></canvas></div>
+  </div>
   <div id="phTable" class="scroll"></div>
 </section>
 

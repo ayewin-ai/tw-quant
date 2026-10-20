@@ -44,7 +44,7 @@ SUGGEST = {
 
 def _load_actual(target):
     con = db.connect()
-    px = pd.read_sql("SELECT code,name,ret,close,open,high,low,value FROM prices WHERE date=?", con, params=(target,))
+    px = pd.read_sql("SELECT code,name,ret,close,open,high,low,value,volume FROM prices WHERE date=?", con, params=(target,))
     inst = pd.read_sql("SELECT code,foreign_net,trust_net,dealer_net,total_net FROM inst WHERE date=?", con, params=(target,))
     idx = dict(con.execute("SELECT name,pct FROM index_daily WHERE date=?", (target,)).fetchall())
     info = pd.read_sql("SELECT code,industry FROM stock_info", con)
@@ -248,11 +248,15 @@ def review_one(pred_date, target, news=True, mode="cc"):
     mkt = idx.get("TAIEX")
     otc = idx.get("TPEX")
     us, us_dates = _us_between(pred_date, target)
-    df = preds.join(px[["ret", "close", "open", "value"]].rename(columns={"close": "t_close", "open": "t_open"}), how="left")
+    df = preds.join(px[["ret", "close", "open", "value", "volume"]].rename(columns={"close": "t_close", "open": "t_open"}), how="left")
     df = df[df.ret.notna()].copy()
+    df["cc"] = df.ret
+    df["gap"] = df.t_open / (df.t_close / (1 + df.ret)) - 1
+    df["intra"] = df.t_close / df.t_open - 1
+    for c in ("gap", "intra"):
+        df.loc[~np.isfinite(df[c]), c] = np.nan
     if mode == "oc":
-        df["gap"] = df.t_open / (df.t_close / (1 + df.ret)) - 1
-        df["ret"] = df.t_close / df.t_open - 1
+        df["ret"] = df.intra
         df = df[np.isfinite(df.ret)].copy()
         mkt = float(df.ret.mean())
     df["excess"] = df.ret - (mkt or 0)
@@ -263,7 +267,7 @@ def review_one(pred_date, target, news=True, mode="cc"):
     top_n = o["top_n"]
     top = df[df["rank"] <= top_n].sort_values("rank")
     ctx = {"mkt": mkt, "us": us, "target_day": dt.date.fromisoformat(target).day,
-           "ext": _ext_context(pred_date, target), "mode": mode}
+           "ext": _ext_context(pred_date, target), "mode": mode, "target": target}
     try:
         from . import flows
         ctx["flows"] = flows.review_context(pred_date, target, list(df.index))
@@ -328,12 +332,122 @@ def review_one(pred_date, target, news=True, mode="cc"):
     sec = df.groupby("industry").agg(n=("ret", "size"), ret=("ret", "mean"), ex=("excess", "mean"),
                                      prob=("prob", "mean")).query("n>=3").sort_values("ex")
     md = render(o, perf, top, analyses, sec, us, us_dates, df)
+    try:
+        md += gap_section(df, top_n, ctx, inst, exd, avg_vol, analyses, us)
+    except Exception as e:
+        md += f"\n（跳空/盤中分析失敗：{e}）\n"
     path = REVIEW_REPORT_DIR / f"review_{stem}.md"
     path.write_text(md)
     _append_logs(perf, analyses, pred_date, target, oc=(mode == "oc"))
     write_patterns()
     print(md)
     print(f"\n檢討報告：{path}\n累積紀錄：{LOG}\n錯誤模式統計：{PATTERNS}")
+
+
+_CKEYS = ["美股隔夜", "台指期夜盤", "除權息", "前日漲停延續", "前日漲停後開低", "收盤後新聞", "大盤同步跳空", "開高走低",
+          "開低走高", "漲停打開", "法人同步買超", "法人同步賣超", "產業盤中", "亞股同日", "大盤盤中", "爆量", "個股特有/不明"]
+
+
+def _ckey(c):
+    return next((k for k in _CKEYS if k in c), c[:8])
+
+
+def _bench_split(target):
+    con = db.connect()
+    r = con.execute("SELECT open, close, ret FROM prices WHERE date=? AND code='0050'", (target,)).fetchone()
+    con.close()
+    if not r or not r[0] or r[2] is None:
+        return None, None
+    prev = r[1] / (1 + r[2])
+    return r[0] / prev - 1, r[1] / r[0] - 1
+
+
+def gap_section(df, top_n, ctx, inst, exd, avg_vol, analyses, us):
+    """隔日開盤 vs 收盤價差分析: split each top-N stock into overnight gap and intraday, attribute causes."""
+    ex = ctx.get("ext") or {}
+    target = ctx.get("target")
+    bg, bi = _bench_split(target) if target else (None, None)
+    sox, ndx, tsm = us.get("sox"), us.get("nasdaq"), us.get("tsm_adr")
+    night, asia = ex.get("night_ret"), ex.get("asia")
+    sec_intra = df.groupby("industry").intra.mean()
+    news_by = {a["code"]: a.get("news") or [] for a in analyses}
+    top = df[df["rank"] <= top_n].sort_values("rank")
+    notable = df[(df["rank"] > top_n) & ((df.gap.abs() >= 0.05) | (df.intra.abs() >= 0.06))]
+    notable = notable.reindex(notable.cc.abs().sort_values(ascending=False).index).head(5)
+    gap_cnt, intra_cnt = Counter(), Counter()
+
+    def causes(code, r):
+        g, it = r.gap, r.intra
+        tech = r["industry"] in TECH_INDUSTRIES
+        gc, ic = [], []
+        if pd.notna(g) and abs(g) >= 0.005:
+            sg = np.sign(g)
+            if ctx.get("mode") != "oc":
+                if tech and sox is not None and sg * sox >= 0.01:
+                    gc.append(f"美股隔夜（費半 {sox:+.2%}、台積電ADR {(tsm or 0):+.2%}）")
+                elif ndx is not None and sg * ndx >= 0.01:
+                    gc.append(f"美股隔夜（那指 {ndx:+.2%}）")
+                if night is not None and sg * night >= 0.005:
+                    gc.append(f"台指期夜盤 {night:+.2%}")
+            if code in exd.index:
+                gc.append("除權息（開盤參考價已扣除）")
+            if (r.get("r1") or 0) >= 0.095:
+                gc.append("前日漲停延續" if g > 0 else "前日漲停後開低")
+            tags = sorted({t for n in news_by.get(code, []) for t in n["tags"]})
+            if tags:
+                gc.append("收盤後新聞：" + "、".join(tags))
+            if bg is not None and sg * bg >= 0.005 and not gc:
+                gc.append(f"大盤同步跳空（0050 {bg:+.2%}）")
+            if not gc:
+                gc.append("個股特有/不明")
+        if pd.notna(it) and abs(it) >= 0.005:
+            si = np.sign(it)
+            if pd.notna(g) and g >= 0.01 and it <= -0.01:
+                ic.append("開高走低（跳空後獲利了結）")
+            elif pd.notna(g) and g <= -0.01 and it >= 0.01:
+                ic.append("開低走高（跳空過度、低接）")
+            if (r.get("r1") or 0) >= 0.095 and it <= -0.02:
+                ic.append("漲停打開")
+            row = inst.loc[code] if code in inst.index else None
+            av = avg_vol.get(code)
+            if row is not None and av and abs(row.get("total_net") or 0) >= 0.1 * av and np.sign(row.get("total_net") or 0) == si:
+                ic.append(f"法人同步{'買' if si > 0 else '賣'}超 {(row.get('total_net') or 0) / 1000:+,.0f} 張（盤中資金流代理）")
+            se = sec_intra.get(r["industry"])
+            if se is not None and pd.notna(se) and si * se >= 0.01:
+                ic.append(f"{r['industry']} 產業盤中 {se:+.2%}")
+            if asia is not None and si * asia >= 0.01:
+                ic.append(f"亞股同日 {asia:+.2%}")
+            if bi is not None and si * bi >= 0.007:
+                ic.append(f"大盤盤中（0050 {bi:+.2%}）")
+            if av and r.get("volume") and r.volume >= 2 * av:
+                ic.append(f"爆量 {r.volume / av:.1f} 倍（當沖/題材資金）")
+            if not ic:
+                ic.append("個股特有/不明")
+        return gc, ic
+
+    L = ["", "## 隔日開盤 vs 收盤價差分析", "",
+         "總報酬（收→收）＝ 跳空（前日收盤→今日開盤）× 盤中（開盤→收盤）。基準 0050："
+         f"跳空 {_p(bg)}、盤中 {_p(bi)}。", "",
+         "| # | 代號 | 名稱 | 跳空 | 盤中 | 收→收 | 跳空原因 | 盤中原因 |", "|---|---|---|---|---|---|---|---|"]
+    for code, r in pd.concat([top, notable]).iterrows():
+        gc, ic = causes(code, r)
+        for c in gc:
+            gap_cnt[_ckey(c)] += r["rank"] <= top_n
+        for c in ic:
+            intra_cnt[_ckey(c)] += r["rank"] <= top_n
+        tag = int(r["rank"]) if r["rank"] <= top_n else f"({int(r['rank'])})"
+        L.append(f"| {tag} | {code} | {r['name']} | {_p(r.gap)} | {_p(r.intra)} | {_p(r.cc)} | "
+                 f"{'；'.join(gc) or '—'} | {'；'.join(ic) or '—'} |")
+    g, i, c = top.gap.mean(), top.intra.mean(), top.cc.mean()
+    L += ["", "括號排名＝不在 Top 名單、但跳空或盤中變動特別大的個股。", "", "### 彙總歸因（Top 名單）", "",
+          f"- Top {top_n} 平均：跳空 {_p(g)}（相對 0050 {_p(g - bg if bg is not None else None)}）、"
+          f"盤中 {_p(i)}（相對 0050 {_p(i - bi if bi is not None else None)}）、收→收 {_p(c)}",
+          f"- 報酬來源：{'主要來自隔夜跳空' if abs(g) > abs(i) else '主要來自盤中'}；"
+          f"{'跳空與盤中方向相反（開高走低/開低走高）' if g * i < 0 else '跳空與盤中同向'}。",
+          "- 跳空原因次數：" + ("、".join(f"{k}×{v}" for k, v in gap_cnt.most_common() if v) or "無"),
+          "- 盤中原因次數：" + ("、".join(f"{k}×{v}" for k, v in intra_cnt.most_common() if v) or "無"),
+          "- 解讀：收盤後名單只能在隔日開盤買進，跳空部分拿不到；可實際取得的是盤中（開→收）報酬。", ""]
+    return "\n".join(L) + "\n"
 
 
 def _p(x, signed=True):

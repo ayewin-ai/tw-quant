@@ -23,7 +23,9 @@ PRED_ARCH = ARCH / "predictions"
 PVA = ARCH / "prediction_vs_actual"
 SUMMARY = ARCH / "daily_summary.csv"
 PVA_COLS = ["kind", "pred_date", "target_date", "code", "name", "industry", "rank", "prob", "in_top",
-            "ret_cc", "ret_oc", "taiex_cc", "universe_oc", "excess_cc", "excess_oc", "up", "beat", "basis"]
+            "ret_cc", "gap", "ret_oc", "taiex_cc", "bm_gap", "bm_oc", "bm_cc", "universe_oc",
+            "excess_cc", "excess_gap", "excess_oc", "excess_oc_univ", "up", "beat", "basis"]
+BENCH = "0050"  # gap / intraday benchmark: TAIEX has no tradable open print, 0050 (tracks TW50, ~cap-weighted) does
 
 
 def _kind_key(o, stem):
@@ -77,6 +79,17 @@ def _actuals(target):
     return px, (t[0] if t else None)
 
 
+def _bench(target):
+    con = db.connect()
+    r = con.execute("SELECT open, close, ret FROM prices WHERE date=? AND code=?", (target, BENCH)).fetchone()
+    con.close()
+    if not r or not r[0] or r[2] is None:
+        return None, None, None
+    o, c, cc = r
+    prev = c / (1 + cc)
+    return o / prev - 1, c / o - 1, cc
+
+
 def update_vs_actual(top_n=10):
     """Append outcomes for archived predictions whose target day now has price data. Append-only."""
     ARCH.mkdir(parents=True, exist_ok=True)
@@ -104,13 +117,18 @@ def update_vs_actual(top_n=10):
             continue
         d["ret_cc"] = d.ret
         d["ret_oc"] = d.close / d.open - 1
-        d.loc[~np.isfinite(d.ret_oc), "ret_oc"] = np.nan
-        d["taiex_cc"] = taiex
+        d["gap"] = d.open / (d.close / (1 + d.ret)) - 1          # (1+cc) = (1+gap)(1+oc)
+        for c in ("ret_oc", "gap"):
+            d.loc[~np.isfinite(d[c]), c] = np.nan
+        bg, bo, bc = _bench(tgt)
+        d["taiex_cc"], d["bm_gap"], d["bm_oc"], d["bm_cc"] = taiex, bg, bo, bc
         d["universe_oc"] = d.ret_oc.mean()
         d["excess_cc"] = d.ret_cc - (taiex or 0)
-        d["excess_oc"] = d.ret_oc - d.universe_oc
+        d["excess_gap"] = d.gap - (bg if bg is not None else np.nan)
+        d["excess_oc"] = d.ret_oc - (bo if bo is not None else np.nan)
+        d["excess_oc_univ"] = d.ret_oc - d.universe_oc
         basis = "oc" if kind == "preopen" else "cc"
-        r, ex = (d.ret_oc, d.excess_oc) if basis == "oc" else (d.ret_cc, d.excess_cc)
+        r, ex = (d.ret_oc, d.excess_oc_univ) if basis == "oc" else (d.ret_cc, d.excess_cc)
         d["up"] = (r > 0).astype(int)
         d["beat"] = (ex > 0).astype(int)
         d["basis"] = basis
@@ -131,6 +149,9 @@ def update_vs_actual(top_n=10):
                      "top_avg_ret": (top.ret_oc if basis == "oc" else top.ret_cc).mean(),
                      "top_avg_excess": (top.excess_oc if basis == "oc" else top.excess_cc).mean(),
                      "top_avg_ret_cc": top.ret_cc.mean(), "top_avg_ret_oc": top.ret_oc.mean(),
+                     "top_avg_gap": top.gap.mean(), "top_beat_taiex_cc": (top.excess_cc > 0).mean(),
+                     "top_ex_gap": top.excess_gap.mean(), "top_ex_oc": top.excess_oc.mean(), "top_ex_cc": top.excess_cc.mean(),
+                     "bm_gap": bg, "bm_oc": bo, "bm_cc": bc,
                      "universe_avg_ret": r.mean(), "taiex_cc": taiex, "auc": auc,
                      "rank_ic": d.prob.corr(r, method="spearman")})
     if sums:
@@ -164,8 +185,10 @@ def write_comparison():
     if not SUMMARY.exists():
         return None
     s = pd.read_csv(SUMMARY).drop_duplicates(["kind", "pred_date"], keep="first")
-    cols = {"top_up": "top10_up", "top_beat": "top10_beat", "top_avg_ret": "top10_avg_ret",
-            "top_avg_excess": "top10_avg_excess", "auc": "auc", "rank_ic": "rank_ic"}
+    cols = {"top_up": "top10_up", "top_beat": "top10_beat", "top_beat_taiex_cc": "top10_beat_taiex",
+            "top_avg_ret": "top10_avg_ret", "top_avg_excess": "top10_avg_excess", "auc": "auc", "rank_ic": "rank_ic",
+            "top_avg_gap": "top10_gap", "top_avg_ret_oc": "top10_intraday", "top_avg_ret_cc": "top10_total",
+            "top_ex_gap": "top10_ex_gap", "top_ex_oc": "top10_ex_intraday", "top_ex_cc": "top10_ex_total"}
     out = None
     for kind in ("close", "preopen"):
         k = s[s.kind == kind].set_index("target_date")[list(cols) + ["pred_date"]].rename(columns=cols)
@@ -173,8 +196,9 @@ def write_comparison():
             k["top10_net_ret"] = k["top10_avg_ret"] - COST_ROUNDTRIP
         k = k.add_prefix(f"{kind}_")
         out = k if out is None else out.join(k, how="outer")
-    tx = s.groupby("target_date").taiex_cc.first()
-    out = out.join(tx.rename("taiex_ret")).sort_index().round(5)
+    g = s.groupby("target_date")
+    out = out.join(g.taiex_cc.first().rename("taiex_ret")).join(g.bm_gap.first().rename("bm0050_gap")) \
+        .join(g.bm_oc.first().rename("bm0050_intraday")).join(g.bm_cc.first().rename("bm0050_total")).sort_index().round(5)
     out.index.name = "target_date"
     out.to_csv(COMP)
     return out

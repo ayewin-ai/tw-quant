@@ -209,11 +209,28 @@ function renderPredHistory(ph) {
     L('盤前 Rank IC', rows.map(r => v(r, 'preopen_rank_ic')), '#ff6b6b', {borderDash: [4, 3]}),
     L('AUC 0.5', D.map(() => 0.5), '#888', {pointRadius: 0, borderWidth: 1, borderDash: [2, 2]}),
     L('IC 0', D.map(() => 0), '#555', {pointRadius: 0, borderWidth: 1, borderDash: [2, 2]})]}, options: opt('每日 AUC / Rank IC', false)});
+  charts.phSplit = new Chart($('phSplit'), {type: 'line', data: {labels: D, datasets: [
+    L('收盤後 Top-10 累積 跳空', cum('close_top10_gap'), '#4fa3ff'),
+    L('收盤後 Top-10 累積 盤中', cum('close_top10_intraday'), '#ffd166'),
+    L('收盤後 Top-10 累積 總計', cum('close_top10_total'), '#c084fc', {borderWidth: 3}),
+    L('盤前 Top-10 累積 盤中', cum('preopen_top10_intraday'), '#3ddc97'),
+    L('0050 累積 跳空', cum('bm0050_gap'), '#a5c8ff', {borderDash: [5, 3]}),
+    L('0050 累積 盤中', cum('bm0050_intraday'), '#ffe7a3', {borderDash: [5, 3]}),
+    L('0050 累積 總計', cum('bm0050_total'), '#ffffff', {borderDash: [5, 3]})]}, options: opt('累積：跳空 vs 盤中 vs 總計（未扣成本）')});
+  charts.phStack = new Chart($('phStack'), {type: 'bar', data: {labels: D, datasets: [
+    {label: '收盤後 Top-10 跳空', data: rows.map(r => r.close_top10_gap), backgroundColor: '#4fa3ff', stack: 'c'},
+    {label: '收盤後 Top-10 盤中', data: rows.map(r => r.close_top10_intraday), backgroundColor: '#ffd166', stack: 'c'},
+    {label: '盤前 Top-10 跳空', data: rows.map(r => r.preopen_top10_gap), backgroundColor: '#1f8f63', stack: 'p'},
+    {label: '盤前 Top-10 盤中', data: rows.map(r => r.preopen_top10_intraday), backgroundColor: '#3ddc97', stack: 'p'}]},
+    options: {...opt('每日 Top-10 報酬貢獻：跳空 vs 盤中'), scales: {x: {stacked: true}, y: {stacked: true, ticks: {callback: x => (x * 100).toFixed(1) + '%'}}}}});
   const cols = [['target_date', '目標日', 'd'], ['close_top10_up', '收盤後 上漲比例', 'r'], ['close_top10_beat', '收盤後 勝過加權', 'r'],
     ['close_top10_avg_ret', '收盤後 平均報酬', 'p'], ['close_top10_avg_excess', '收盤後 平均超額', 'p'], ['close_auc', '收盤後 AUC', 'n'],
     ['close_rank_ic', '收盤後 Rank IC', 'n'], ['preopen_top10_up', '盤前 上漲比例', 'r'], ['preopen_top10_beat', '盤前 勝過全體', 'r'],
     ['preopen_top10_avg_ret', '盤前 開→收平均', 'p'], ['preopen_top10_avg_excess', '盤前 超額', 'p'], ['preopen_auc', '盤前 AUC', 'n'],
-    ['preopen_rank_ic', '盤前 Rank IC', 'n'], ['taiex_ret', '加權指數', 'p']];
+    ['preopen_rank_ic', '盤前 Rank IC', 'n'], ['taiex_ret', '加權指數', 'p'],
+    ['close_top10_gap', '收盤後 跳空', 'p'], ['close_top10_intraday', '收盤後 盤中', 'p'], ['close_top10_total', '收盤後 總計', 'p'],
+    ['preopen_top10_gap', '盤前 跳空', 'p'], ['preopen_top10_intraday', '盤前 盤中', 'p'], ['preopen_top10_total', '盤前 總計', 'p'],
+    ['bm0050_gap', '0050 跳空', 'p'], ['bm0050_intraday', '0050 盤中', 'p'], ['bm0050_total', '0050 總計', 'p']];
   const fmt = (x, t) => x == null ? '—' : t === 'r' ? `${Math.round(x * 100)}%` : t === 'p' ? `<span class="${cls(x)}">${pct(x)}</span>` : t === 'n' ? x.toFixed(3) : x;
   let sortK = 'target_date', asc = false;
   const draw = () => {
