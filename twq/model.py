@@ -269,6 +269,13 @@ def ablation_md():
               f"Top-10 本身平均只有 {base['top_avg_oc_bp']:.1f} bp，即使用當沖減半證交稅（每趟約 0.32%）仍低於成本。",
               f"- 扣成本後最佳組合「{SET_NAMES.get(best['set'], best['set'])}」累積 {pct(best['cum_oc_net'])}，"
               f"同期加權指數 {pct(best['cum_taiex'])}，**{'有' if best['cum_oc_net'] > best['cum_taiex'] else '沒有'}勝過大盤**。",
-              "- 以收→收為目標時，加入期貨/盤前特徵 AUC(自身目標) 升高，但主要是預測隔夜跳空，開盤後無法取得，反而讓開→收表現變差。",
+              *(["- 以收→收為目標時，加入期貨/盤前特徵 AUC(自身目標) 升高，但主要是預測隔夜跳空，開盤後無法取得，反而讓開→收表現變差。"]
+                if any(r["label"] == "y" for r in d.values()) else []),
+              *([("- ETF/指數調整、法說會、科技大事件、政府基金：相對基本組 開→收 AUC 變化 " +
+                  "、".join(f"{SET_NAMES.get(r['set'], r['set']).split('（')[0]} {r['auc_oc'] - base['auc_oc']:+.4f}"
+                           for r in oc if r["set"] in ("+etf_index", "+conf", "+tech_events", "+gov_funds", "all_flow")) +
+                  "，全部在雜訊範圍內。限制：成分股調整事件只佔約 0.3% 的股票-日；政府基金新聞量只回補到最近幾個月；"
+                  "ETF 持股只有即時快照、沒有歷史，未納入回測。")]
+                if any(r["set"] == "+etf_index" for r in oc) else []),
               "- 因此每日收盤後預測維持「基本」特徵組；盤前更新使用「全部＋盤前、開→收」僅作參考。**本系統不構成投資建議。**"]
     return "\n".join(L) + "\n"
