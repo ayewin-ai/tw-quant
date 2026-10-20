@@ -175,3 +175,20 @@ cd docs && python3 -m http.server 8000  # 本機預覽 http://localhost:8000
 
 `run_daily.sh` 最後一步會自動執行 `twq site`，commit + push 後網站就會更新。
 GitHub 設定：Settings → Pages → Source 選 **Deploy from a branch**，Branch 選 `main`、資料夾 `/docs`。
+
+## 9. 每日自動調整與程式修正
+
+### 9.1 自動調權（`python -m twq tune`，run_daily.sh 第 2b 步，在檢討之後、預測之前）
+- 可調參數全部在 `config/weights.json`（納入版本控制，歷史版本在 `config/history/`）：
+  LightGBM 超參數、訓練樣本時間衰減半衰期、特徵組、盤後分數調整（前日漲停扣分、前日大漲扣分、Top-10 同產業上限、盤前跳空強度）、流動性門檻。
+- 流程：讀近 20 次檢討（含盤前名單、跳空/盤中拆解）→ 針對常見誤判原因產生最多 4 個小幅候選（有上下限與單日步長限制）→
+  在**近 90 個交易日**用 walk-forward 比較冠軍與挑戰者（不是只看昨天）。
+- 採用門檻（全部要成立）：開→收扣成本 ≥ +3 bp/日、Top-10 超額不差於 −2 bp、AUC 不差於 −0.002、前後兩半段都改善；每天最多採用一項。
+- 回滾：新版本上線滿 10 個交易日後，若實際 Top-10 超額比前一版最後 10 日差 30 bp/日以上且為負，自動回到前一版設定。
+- 紀錄：`reports/tuning_log.csv`（每個候選的指標與中文理由）、`reports/CHANGELOG_model.md`（可讀版），網站「模型自動調整」區塊有圖表。
+- `python -m twq tune --dry` 只評估不寫入。耗時約 1–2 分鐘（有快取）。
+
+### 9.2 程式層級修正（檢討中發現的 bug 或需要的新特徵）
+- 由每日例行的 agent 處理：在獨立 git worktree/分支修改 → `TWQ_NOPUSH=1 ./run_daily.sh` 完整 dry-run 通過 → 合併到 main 後推送一次。
+- commit 訊息一律以 `auto-fix:` 開頭，並在 `reports/CHANGELOG_model.md` 記一筆（`twq.tune.record_fix("說明", "檔案")`）。
+- 涉及模型行為的修改，須附上 walk-forward 前後比較；未通過就不合併。
