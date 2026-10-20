@@ -17,11 +17,23 @@ N_ROUNDS = 300
 COST_ROUNDTRIP = 0.001425 * 2 * 0.6 + 0.003  # 手續費(6折)x2 + 證交稅0.3%
 
 
-def train(X: pd.DataFrame, feats=None, label="y"):
+def train(X: pd.DataFrame, feats=None, label="y", w=None):
+    """w: tunable weights dict (config/weights.json). None = load the committed config."""
+    from . import weights as W
+    w = w or W.load()
     feats = feats or F.FEATURES
     d = X[X[label].notna()]
-    ds = lgb.Dataset(d[feats], label=d[label])
-    return lgb.train(PARAMS, ds, num_boost_round=N_ROUNDS)
+    m = dict(w.get("model") or {})
+    rounds = int(m.pop("num_rounds", N_ROUNDS))
+    params = {**PARAMS, **m}
+    sw = None
+    hl = w.get("recency_half_life_days")
+    if hl:
+        dts = pd.to_datetime(d.index.get_level_values("date"))
+        age = (dts.max() - dts).days.values
+        sw = 0.5 ** (age / float(hl))
+    ds = lgb.Dataset(d[feats], label=d[label], weight=sw)
+    return lgb.train(params, ds, num_boost_round=rounds)
 
 
 def contributions(booster, Xp: pd.DataFrame, feats=None):
@@ -30,7 +42,7 @@ def contributions(booster, Xp: pd.DataFrame, feats=None):
     return pd.DataFrame(c[:, :-1], index=Xp.index, columns=feats), c[:, -1]
 
 
-def walk_forward(X, min_train_days=250, step=21, start=None, feats=None, label="y", verbose=True):
+def walk_forward(X, min_train_days=250, step=21, start=None, feats=None, label="y", verbose=True, w=None):
     feats = feats or F.FEATURES
     days = sorted(X.index.get_level_values("date").unique())
     lab_days = [d for d in days if X.loc[d].y.notna().any()]
@@ -41,7 +53,7 @@ def walk_forward(X, min_train_days=250, step=21, start=None, feats=None, label="
         test_days = lab_days[i:i + step]
         tr = X.loc[train_days[0]:train_days[-1]]
         te = X.loc[test_days[0]:test_days[-1]]
-        b = train(tr, feats, label)
+        b = train(tr, feats, label, w=w)
         p = b.predict(te[feats])
         o = te[["next_ret", "next_oc", "next_mkt", "next_excess", "next_xs", "y", "y_oc"]].copy()
         o["y_cc"] = o["y"]

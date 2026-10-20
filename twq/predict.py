@@ -51,16 +51,21 @@ def factor_list(contrib_row, x_row, n=5, sign=1):
 
 
 def get_model(X, date: str, fset=None, label=None, tag="model"):
-    fset, label = fset or PREDICT_SET, label or PREDICT_LABEL
+    import os
+    from . import weights as W
+    w = W.load()
+    fset = fset or (os.environ.get("TWQ_SET") or w.get("feature_set") or PREDICT_SET)
+    label = label or PREDICT_LABEL
     feats = F.FEATURE_SETS[fset]
-    path = MODEL_DIR / f"{tag}_{fset}_{label}_{date}.txt"
+    path = MODEL_DIR / f"{tag}_{fset}_{label}_{date}_{W.model_hash(w)}.txt"
     if path.exists():
         return lgb.Booster(model_file=str(path)), json.loads(path.with_suffix(".json").read_text())
     tr = X[(X.index.get_level_values("date") < date) & X[label].notna()]
-    b = M.train(tr, feats, label)
+    b = M.train(tr, feats, label, w=w)
     b.save_model(str(path))
     meta = {"train_rows": int(len(tr)), "train_start": tr.index.get_level_values("date").min(),
-            "train_end": tr.index.get_level_values("date").max(), "rounds": M.N_ROUNDS,
+            "train_end": tr.index.get_level_values("date").max(), "rounds": int(w["model"].get("num_rounds", M.N_ROUNDS)),
+            "weights_version": w.get("version"), "recency_half_life_days": w.get("recency_half_life_days"),
             "feature_set": fset, "label": label, "n_features": len(feats)}
     path.with_suffix(".json").write_text(json.dumps(meta))
     # keep only the 10 most recent models
@@ -124,13 +129,15 @@ def score(X, ds, target, booster, meta, top, limitup, mode="base"):
     contrib, base = pd.DataFrame(c[:, :-1], index=Xp.index, columns=feats), c[:, -1]
     Xp["prob"] = prob
     Xp["limitup_flag"] = (Xp["r1"] >= 0.095)
-    Xp["score"] = Xp["prob"]
+    from . import weights as W
+    w = W.load()
     if limitup == "exclude":
-        Xp.loc[Xp.limitup_flag, "score"] -= 1.0
+        w["score"]["limitup_penalty"] = 1.0
     elif limitup == "penalize":
-        Xp.loc[Xp.limitup_flag, "score"] -= 0.05
-    Xp = Xp.sort_values("score", ascending=False)
-    Xp["rank"] = np.arange(1, len(Xp) + 1)
+        w["score"]["limitup_penalty"] = max(w["score"].get("limitup_penalty", 0), 0.05)
+    Xp = W.adjust(Xp, w, top, preopen=(mode == "preopen"))   # tunable post-model adjustments (config/weights.json)
+    meta = {**meta, "weights_version": w.get("version"), "score_adjust": w["score"],
+            "liquidity_min_avg_value": w.get("liquidity_min_avg_value")}
     con = db.connect()
     names = dict(con.execute("SELECT code,name FROM prices WHERE date=?", (ds,)).fetchall())
     con.close()
