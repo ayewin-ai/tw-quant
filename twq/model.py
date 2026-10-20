@@ -232,7 +232,11 @@ def ablation(start="2025-03-01", step=42, sets=None, labels=("y_oc", "y")):
 SET_NAMES = {"base": "基本（技術+籌碼+大盤+美股前一晚+營收）", "+futures": "＋期貨（台指期/外資未平倉/P-C）",
              "+global": "＋國際股市（日韓港陸歐、美股期貨、匯率利率原油黃金）",
              "+events": "＋事件風險（GDELT 地緣政治、中文新聞量、地震、產業交互作用）",
-             "all_base": "全部（收盤後可得）", "preopen": "全部＋盤前（台指期夜盤、當晚美股、隔夜事件）"}
+             "all_base": "全部（收盤後可得）", "preopen": "全部＋盤前（台指期夜盤、當晚美股、隔夜事件）",
+             "+etf_index": "＋ETF/指數調整（MSCI、台灣50、高股息ETF 納入剔除事件窗）", "+conf": "＋法說會（MOPS 行事曆、事件研究）",
+             "+tech_events": "＋科技大事件（Computex/GTC/Apple/CES、台積電/輝達/蘋果財報）",
+             "+gov_funds": "＋國家隊/政府基金（新聞量代理）", "all_flow": "基本＋以上四組",
+             "preopen_flow": "全部＋盤前＋以上四組"}
 
 
 def ablation_md():

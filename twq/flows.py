@@ -317,3 +317,228 @@ def update(start: dt.date, end: dt.date, verbose=True):
     if verbose:
         print("flows update:", out, flush=True)
     return out
+
+
+# ---------------------------------------------------------------- features
+ETF_F = ["etf_w", "etf_n", "idx_add_w", "idx_del_w", "idx_days_to_rebal", "idx_post_add", "idx_post_del", "rebal_mkt_days"]
+CONF_F = ["conf_days_to", "conf_days_since", "conf_pre_hist", "conf_post_hist", "conf_n_hist"]
+TECH_F = ["tech_days_to", "tech_days_since", "tech_pre_hist", "tech_post_hist"]
+NAT_F = [f"nat_{k}_z" for k in NAT_TOPICS]
+ALL_F = ETF_F + CONF_F + TECH_F + NAT_F
+INFO = {
+    "etf_w": ("ETF/指數", "主要ETF持股權重合計(%)，僅即時快照"), "etf_n": ("ETF/指數", "被幾檔主要ETF持有，僅即時快照"),
+    "idx_add_w": ("ETF/指數", "已公告將被納入(指數權重加總)"), "idx_del_w": ("ETF/指數", "已公告將被剔除(指數權重加總)"),
+    "idx_days_to_rebal": ("ETF/指數", "距成分股調整生效(交易日)"), "idx_post_add": ("ETF/指數", "納入生效後5日內"),
+    "idx_post_del": ("ETF/指數", "剔除生效後5日內"), "rebal_mkt_days": ("ETF/指數", "距MSCI/台灣50調整日(交易日)"),
+    "conf_days_to": ("法說會", "距法說會(天)"), "conf_days_since": ("法說會", "法說會後(天)"),
+    "conf_pre_hist": ("法說會", "過去法說前5日平均超額"), "conf_post_hist": ("法說會", "過去法說後5日平均超額"),
+    "conf_n_hist": ("法說會", "過去法說會次數"),
+    "tech_days_to": ("科技大事件", "距科技大事件/財報(交易日)"), "tech_days_since": ("科技大事件", "科技大事件後(交易日)"),
+    "tech_pre_hist": ("科技大事件", "產業過去事件前5日平均超額"), "tech_post_hist": ("科技大事件", "產業過去事件後5日平均超額"),
+    **{f"nat_{k}_z": ("國家隊/政府基金", f"{k}新聞量Z(前一日)") for k in NAT_TOPICS},
+}
+
+
+def _read(sql):
+    con = db.connect()
+    try:
+        return pd.read_sql(sql, con)
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        con.close()
+
+
+def _event_study(rel: pd.DataFrame, events: pd.DataFrame, key: str):
+    """rel: dates x keys excess returns. events: columns [key, pos] (pos = trading-day index of event).
+    Returns per (key, known_pos) expanding means of pre (t-5..t-1) and post (t..t+4) excess sums; point-in-time."""
+    pre = rel.rolling(5, min_periods=3).sum().shift(1)
+    post = rel.rolling(5, min_periods=3).sum().shift(-4)
+    out = []
+    n = len(rel)
+    for k, p in events[[key, "pos"]].itertuples(index=False):
+        if k not in rel.columns or p >= n:
+            continue
+        out.append((k, p, "pre", pre.iat[p, rel.columns.get_loc(k)]))
+        if p + 5 < n:
+            out.append((k, p + 5, "post", post.iat[p, rel.columns.get_loc(k)]))
+    if not out:
+        return pd.DataFrame(columns=[key, "pos", "pre_hist", "post_hist", "n_hist"])
+    e = pd.DataFrame(out, columns=[key, "pos", "which", "v"]).dropna()
+    res = []
+    for which in ("pre", "post"):
+        w = e[e.which == which].sort_values("pos")
+        w[f"{which}_hist"] = w.groupby(key).v.transform(lambda s: s.expanding().mean())
+        w["n_hist"] = w.groupby(key).cumcount() + 1 if which == "pre" else np.nan
+        res.append(w.drop(columns=["which", "v"]))
+    r = pd.concat(res).sort_values("pos")
+    # known strictly after the pos day's close -> available from pos (pre is known at event day morning; use pos)
+    return r.groupby([key, "pos"]).last().reset_index()
+
+
+def _asof_by(X, ev, key, cols):
+    """For each row of X (with integer 'pos' and key), take the latest ev row with ev.pos <= X.pos for same key."""
+    out = pd.DataFrame(index=X.index, columns=cols, dtype=float)
+    if ev.empty:
+        return out
+    left = X[["pos", key]].reset_index(drop=True).assign(_i=np.arange(len(X))).sort_values("pos")
+    for c in cols:
+        r = ev[[key, "pos", c]].dropna().sort_values("pos")
+        if r.empty:
+            continue
+        m = pd.merge_asof(left, r, on="pos", by=key, direction="backward")
+        out.iloc[m["_i"].values, out.columns.get_loc(c)] = m[c].values
+    return out
+
+
+def add_features(X: pd.DataFrame) -> pd.DataFrame:
+    dates = sorted(X.index.get_level_values("date").unique())
+    dpos = {d: i for i, d in enumerate(dates)}
+    D = pd.Index(dates)
+    codes = X.index.get_level_values("code")
+    xd = X.index.get_level_values("date")
+    pos = np.array([dpos[d] for d in xd])
+    rel = X["rel_r1"].unstack("code").reindex(dates)
+
+    def to_pos(ds):  # calendar date -> first trading-day index on/after it (len(dates) if beyond)
+        return D.searchsorted(pd.Index(ds), side="left")
+
+    base = pd.DataFrame({"pos": pos, "code": codes, "industry": X["industry"].values}, index=X.index)
+
+    # --- 法說會
+    cc = _read("SELECT code, date FROM conf_calls")
+    if not cc.empty:
+        cc = cc[cc.code.isin(set(codes))]
+        cc["pos"] = to_pos(cc.date)
+        cc = cc.drop_duplicates(["code", "pos"])
+        dts = pd.to_datetime(pd.Series(xd))
+        nxt = pd.merge_asof(pd.DataFrame({"d": dts.values, "code": codes, "_i": np.arange(len(X))}).sort_values("d"),
+                            cc.assign(d=pd.to_datetime(cc.date)).sort_values("d")[["d", "code"]].assign(nd=lambda x: x.d),
+                            on="d", by="code", direction="forward")
+        prv = pd.merge_asof(pd.DataFrame({"d": dts.values, "code": codes, "_i": np.arange(len(X))}).sort_values("d"),
+                            cc.assign(d=pd.to_datetime(cc.date)).sort_values("d")[["d", "code"]].assign(pdd=lambda x: x.d),
+                            on="d", by="code", direction="backward")
+        to = np.full(len(X), np.nan)
+        since = np.full(len(X), np.nan)
+        to[nxt._i.values] = (nxt.nd - nxt.d).dt.days.values
+        since[prv._i.values] = (prv.d - prv.pdd).dt.days.values
+        X["conf_days_to"] = np.where(to <= 10, to, np.nan)       # MOPS posts schedules ~1-3 weeks ahead
+        X["conf_days_since"] = np.where(since <= 10, since, np.nan)
+        es = _event_study(rel, cc[["code", "pos"]], "code")
+        h = _asof_by(base, es.rename(columns={"pre_hist": "conf_pre_hist", "post_hist": "conf_post_hist",
+                                              "n_hist": "conf_n_hist"}), "code",
+                     ["conf_pre_hist", "conf_post_hist", "conf_n_hist"])
+        for c in h:
+            X[c] = h[c].values
+    # --- tech events (industry level)
+    te = pd.DataFrame(TECH_EVENTS, columns=["date", "kind"])
+    te["pos"] = to_pos(te.date)
+    tp = np.sort(te.pos.unique())
+    i_next = np.searchsorted(tp, pos, side="left")
+    X["tech_days_to"] = np.where(i_next < len(tp), np.take(tp, np.minimum(i_next, len(tp) - 1)) - pos, np.nan)
+    X["tech_days_to"] = X["tech_days_to"].where(X["tech_days_to"] <= 10)
+    i_prev = np.searchsorted(tp, pos, side="right") - 1
+    X["tech_days_since"] = np.where(i_prev >= 0, pos - np.take(tp, np.maximum(i_prev, 0)), np.nan)
+    X["tech_days_since"] = X["tech_days_since"].where(X["tech_days_since"] <= 10)
+    srel = X.groupby(["date", "industry"])["rel_r1"].mean().unstack("industry").reindex(dates)
+    ev = pd.DataFrame([(ind, p) for p in tp for ind in srel.columns], columns=["industry", "pos"])
+    es = _event_study(srel, ev, "industry")
+    h = _asof_by(base, es.rename(columns={"pre_hist": "tech_pre_hist", "post_hist": "tech_post_hist"}), "industry",
+                 ["tech_pre_hist", "tech_post_hist"])
+    for c in h:
+        X[c] = h[c].values
+    # --- index rebalance events
+    ie = _read("SELECT ann_date, idx, code, action, rebal_date FROM index_events")
+    for c in ("idx_add_w", "idx_del_w", "idx_post_add", "idx_post_del"):
+        X[c] = 0.0
+    X["idx_days_to_rebal"] = np.nan
+    if not ie.empty:
+        both = ie.groupby(["idx", "code", "rebal_date"]).action.transform("nunique") > 1   # contradictory parse -> drop
+        ie = ie[~both]
+        ie["a"] = to_pos(ie.ann_date)
+        ie["r"] = to_pos(ie.rebal_date)
+        ie["w"] = ie.idx.map(lambda k: INDEXES[k][3])
+        cidx = pd.Series(np.arange(len(X)), index=pd.MultiIndex.from_arrays([pos, codes]))
+        by_code = {c: np.where(codes == c)[0] for c in ie.code.unique()}
+        add_w = np.zeros(len(X)); del_w = np.zeros(len(X)); pa = np.zeros(len(X)); pdl = np.zeros(len(X))
+        dtr = np.full(len(X), np.nan)
+        for e in ie.itertuples(index=False):
+            rows = by_code.get(e.code)
+            if rows is None or not len(rows):
+                continue
+            p = pos[rows]
+            pend = (p >= e.a) & (p < e.r)
+            post = (p >= e.r) & (p < e.r + 5)
+            if e.action == "add":
+                add_w[rows[pend]] += e.w; pa[rows[post]] += e.w
+            else:
+                del_w[rows[pend]] += e.w; pdl[rows[post]] += e.w
+            d = (e.r - p).astype(float)
+            cur = dtr[rows[pend]]
+            dtr[rows[pend]] = np.fmin(cur, d[pend])
+        X["idx_add_w"], X["idx_del_w"], X["idx_post_add"], X["idx_post_del"] = add_w, del_w, pa, pdl
+        X["idx_days_to_rebal"] = dtr
+    rb = rebal_dates(pd.Timestamp(dates[0]).date(), pd.Timestamp(dates[-1]).date() + dt.timedelta(days=120), dates)
+    rp = np.sort(np.unique([D.searchsorted(r) for i, r, w in rb if i in ("MSCI", "0050")]))
+    j = np.searchsorted(rp, pos, side="left")
+    # future dates beyond the data: count weekdays approx (rule-based dates are public in advance)
+    X["rebal_mkt_days"] = np.where(j < len(rp), np.take(rp, np.minimum(j, len(rp) - 1)) - pos, np.nan)
+    X["rebal_mkt_days"] = X["rebal_mkt_days"].where(X["rebal_mkt_days"] <= 15)
+    # --- ETF holdings (live snapshots only)
+    eh = _read("SELECT date, code, SUM(weight) w, COUNT(*) n FROM etf_holdings GROUP BY date, code")
+    X["etf_w"] = np.nan
+    X["etf_n"] = np.nan
+    if not eh.empty:
+        eh["pos"] = to_pos(eh.date)
+        h = _asof_by(base, eh.rename(columns={"w": "etf_w", "n": "etf_n"}), "code", ["etf_w", "etf_n"])
+        X["etf_w"], X["etf_n"] = h["etf_w"].values, h["etf_n"].values
+    # --- government-fund news (market level, strict t-1)
+    nn = _read("SELECT date, topic, n FROM nat_news")
+    for k in NAT_TOPICS:
+        X[f"nat_{k}_z"] = np.nan
+    if not nn.empty:
+        pv = nn.pivot_table(index="date", columns="topic", values="n").sort_index()
+        for k in NAT_TOPICS:
+            if k not in pv:
+                continue
+            s = pv[k].astype(float)
+            z = ((s - s.rolling(60, min_periods=15).mean()) / s.rolling(60, min_periods=15).std().replace(0, np.nan))
+            s_idx = pd.Index(z.index)
+            vals = []
+            for d in dates:
+                i = s_idx.searchsorted(d, side="left") - 1   # strictly before t
+                vals.append(z.iat[i] if i >= 0 else np.nan)
+            X[f"nat_{k}_z"] = pd.Series(vals, index=dates).reindex(xd).values
+    return X
+
+
+def review_context(pred_date, target, codes):
+    """Per-stock review explanations for the target day: index rebalance, 法說會, tech events, gov-fund news."""
+    out = {}
+    t = target
+    ie = _read(f"SELECT ann_date, idx, code, action, rebal_date FROM index_events WHERE rebal_date>=date('{t}','-10 day') "
+               f"AND ann_date<='{t}'")
+    for e in ie.itertuples(index=False):
+        if e.code in codes:
+            out.setdefault(e.code, []).append(("ETF/指數調整", f"{e.idx} {'納入' if e.action == 'add' else '剔除'}（公告 {e.ann_date}，生效 {e.rebal_date}）"))
+    rb = [(i, r) for i, r, _ in rebal_dates(dt.date.fromisoformat(t) - dt.timedelta(days=3), dt.date.fromisoformat(t), [])
+          if r == t]
+    cc = _read(f"SELECT code, date FROM conf_calls WHERE date BETWEEN date('{t}','-3 day') AND date('{t}','+3 day')")
+    for e in cc.itertuples(index=False):
+        if e.code in codes:
+            out.setdefault(e.code, []).append(("法說會", f"法說會 {e.date}"))
+    near = [(d, k) for d, k in TECH_EVENTS if abs((dt.date.fromisoformat(d) - dt.date.fromisoformat(t)).days) <= 2]
+    if near or rb:
+        from .review import TECH_INDUSTRIES
+        info = _read("SELECT code, industry FROM stock_info").set_index("code").industry
+        for c in codes:
+            if near and info.get(c) in TECH_INDUSTRIES:
+                out.setdefault(c, []).append(("科技大事件", "、".join(f"{k} {d}" for d, k in near)))
+    nn = _read(f"SELECT topic, n FROM nat_news WHERE date='{t}'")
+    hist = _read(f"SELECT topic, AVG(n) m FROM nat_news WHERE date<'{t}' AND date>=date('{t}','-60 day') GROUP BY topic")
+    if not nn.empty and not hist.empty:
+        m = hist.set_index("topic").m
+        hot = [f"{r.topic} 新聞 {r.n} 則（平時 {m.get(r.topic, 0):.1f}）" for r in nn.itertuples() if r.n >= max(3, 3 * m.get(r.topic, 0))]
+        if hot:
+            out["__market__"] = [("國家隊/政府基金", "；".join(hot))]
+    return out

@@ -181,6 +181,8 @@ def classify(kind, s, ctx, drivers, news_items, inst_row):
     if f:
         for cause, detail in f:
             causes.append((cause, detail))
+    if kind == "missed_winner" and fl.get("__market__"):
+        causes += fl["__market__"]
     mkt, us = ctx["mkt"], ctx["us"]
     sox, tsm, ndx = us.get("sox"), us.get("tsm_adr"), us.get("nasdaq")
     is_tech = s["industry"] in TECH_INDUSTRIES

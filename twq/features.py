@@ -51,6 +51,8 @@ from . import features_ext as FX
 
 BASE_FEATURES = list(FEATURE_INFO)
 FEATURE_INFO.update(FX.INFO)
+from . import flows as FL  # noqa: E402
+FEATURE_INFO.update(FL.INFO)
 FEATURE_SETS = {
     "base": BASE_FEATURES,
     "+futures": BASE_FEATURES + FX.FUT,
@@ -58,6 +60,13 @@ FEATURE_SETS = {
     "+events": BASE_FEATURES + FX.EVENTS + FX.STOCK_EXT,
     "all_base": BASE_FEATURES + FX.FUT + FX.GLOBAL + FX.EVENTS + FX.STOCK_EXT,
     "preopen": BASE_FEATURES + FX.FUT + FX.GLOBAL + FX.EVENTS + FX.STOCK_EXT + FX.PREOPEN,
+    "+etf_index": BASE_FEATURES + [c for c in FL.ETF_F if c not in ("etf_w", "etf_n")],
+    "+conf": BASE_FEATURES + FL.CONF_F,
+    "+tech_events": BASE_FEATURES + FL.TECH_F,
+    "+gov_funds": BASE_FEATURES + FL.NAT_F,
+    "all_flow": BASE_FEATURES + [c for c in FL.ALL_F if c not in ("etf_w", "etf_n")],
+    "preopen_flow": BASE_FEATURES + FX.FUT + FX.GLOBAL + FX.EVENTS + FX.STOCK_EXT + FX.PREOPEN +
+                    [c for c in FL.ALL_F if c not in ("etf_w", "etf_n")],
 }
 FEATURES = BASE_FEATURES  # default (overridden by config of the trained model)
 
@@ -287,6 +296,12 @@ def build(start=None, end=None, with_labels=True, min_hist=None, next_day=None):
     X["close"] = close.stack(future_stack=True).reindex(X.index).values
     X["value"] = val.stack(future_stack=True).reindex(X.index).values
     X = FX.stock_level(X)
+    try:
+        X = FL.add_features(X)
+    except Exception as e:  # never break the pipeline
+        print("flow features unavailable:", e)
+        for c in FL.ALL_F:
+            X[c] = np.nan
 
     if with_labels:
         nxt_ret = ret.where(traded).shift(-1)
