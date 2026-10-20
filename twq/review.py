@@ -14,6 +14,8 @@ TECH_INDUSTRIES = {"半導體", "電子零組件", "電腦及週邊", "光電", 
 LOG = REPORT_DIR / "review_log.csv"
 PERF = REPORT_DIR / "performance_log.csv"
 PATTERNS = REPORT_DIR / "error_patterns.md"
+LOG_PRE = REPORT_DIR / "review_log_preopen.csv"
+PERF_PRE = REPORT_DIR / "performance_log_preopen.csv"
 
 SUGGEST = {
     "大盤系統性": "加入「大盤方向」子模型或風險開關（台指期夜盤、VIX、外資期貨未平倉），大盤轉弱時降低部位；目前模型只預測相對強弱。",
@@ -32,6 +34,10 @@ SUGGEST = {
     "地緣政治": "已加入 GDELT 台海/戰爭/制裁新聞量與中文新聞量；可再加入國防/航運族群的事件交互作用或改用更即時的新聞流。",
     "氣候災害": "已加入 USGS 地震與災害新聞量；可再加入氣象署颱風警報（需 API 金鑰）與停班停課資訊。",
     "突發事件": "突發事件難以預測；建議加入盤前事件掃描與風險開關（事件指數過高時降低部位）。",
+    "開高走低/跳空回補": "盤前名單以開→收計算；開盤跳空大的個股常回補。可在盤前或開盤後 5 分鐘對大幅跳空股降權。",
+    "ETF/指數調整": "已加入 MSCI／台灣50／高股息 ETF 成分股調整事件窗；生效日前後資金流向常與基本面無關，可在生效日當天降低權重。",
+    "國家隊/政府基金": "國安基金、八大行庫、勞動基金多為低頻或新聞揭露，只能以新聞量代理；大盤急跌時護盤股（權值股）易逆勢。",
+    "科技大事件": "已加入 Computex/GTC/Apple/CES 與台積電/輝達/蘋果財報日的事件窗；事件前常見拉抬、事件後利多出盡。",
     "個股特有/無法解釋": "可能為隨機雜訊；持續累積觀察，若集中在特定產業或股價區間再加特徵。",
 }
 
@@ -85,17 +91,31 @@ def _ext_context(pred_date, target):
             v = df.v.astype(float)
             recent = v.iloc[:2].max()
             return float((recent - v.iloc[2:].mean()) / (v.iloc[2:].std() or 1))
-        zs = [z("gdelt_daily", t, "volume") for t in ("taiwan_strait", "war", "sanctions_tariff")] + \
-             [z("news_counts", t, "n") for t in ("地緣政治", "制裁關稅")]
+        # Google News counts are NOT used here: live counts (when:1d) and backfilled counts are not comparable,
+        # which produced spurious Z>5 readings. GDELT event files are consistent over time.
+        zs = [z("gdelt_daily", t, "volume") for t in ("taiwan_strait", "war", "sanctions_tariff")]
         zs = [x for x in zs if x is not None]
         out["geo_z"] = max(zs) if zs else None
-        dz = [x for x in (z("gdelt_daily", "disaster", "volume"), z("news_counts", "氣候災害", "n")) if x is not None]
+        dz = [x for x in (z("gdelt_daily", "disaster", "volume"),) if x is not None]
         out["disaster_z"] = max(dz) if dz else None
-        ez = [x for x in (z("gdelt_daily", "emergency", "volume"), z("news_counts", "突發事件", "n")) if x is not None]
+        ez = [x for x in (z("gdelt_daily", "emergency", "volume"),) if x is not None]
         out["emergency_z"] = max(ez) if ez else None
         con.close()
     except Exception as e:
         out["error"] = str(e)
+    return out
+
+
+def pending_preopen():
+    done = {p.stem.replace("review_", "") for p in REVIEW_REPORT_DIR.glob("review_preopen_*.md")}
+    tdays = set(F.trading_days())
+    out = []
+    for p in sorted(PRED_DIR.glob("preopen_*.json")):
+        if p.stem in done:
+            continue
+        t = json.loads(p.read_text()).get("target_date")
+        if t in tdays:
+            out.append((p.stem, t))
     return out
 
 
@@ -133,11 +153,29 @@ def run(pred_date: dt.date = None, update=True, news=True):
             print("沒有待檢討的預測（或目標日資料尚未公布）。")
     for pd_, tgt in jobs:
         review_one(pd_, tgt, news=news)
+    if not pred_date:
+        for stem, tgt in pending_preopen():
+            try:
+                review_one(stem, tgt, news=news, mode="oc")
+            except Exception as e:  # never break the daily pipeline
+                print("盤前名單檢討失敗", stem, e)
 
 
 def classify(kind, s, ctx, drivers, news_items, inst_row):
     """Return list of (cause, detail)."""
     causes = []
+    oc_mode = ctx.get("mode") == "oc"
+    if oc_mode and s.get("gap") is not None:
+        g = s["gap"]
+        if kind == "wrong_pick" and g >= 0.02:
+            causes.append(("開高走低/跳空回補", f"開盤跳空 {g:+.2%} 後開→收 {s['ret']:+.2%}"))
+        if kind == "missed_winner" and g <= -0.02:
+            causes.append(("開高走低/跳空回補", f"開盤跳空 {g:+.2%} 後回升 {s['ret']:+.2%}"))
+    fl = ctx.get("flows") or {}
+    f = fl.get(s["code"]) if isinstance(fl, dict) else None
+    if f:
+        for cause, detail in f:
+            causes.append((cause, detail))
     mkt, us = ctx["mkt"], ctx["us"]
     sox, tsm, ndx = us.get("sox"), us.get("tsm_adr"), us.get("nasdaq")
     is_tech = s["industry"] in TECH_INDUSTRIES
@@ -145,7 +183,7 @@ def classify(kind, s, ctx, drivers, news_items, inst_row):
     exc, sec_exc = s["excess"], s["sector_excess"]
     if mkt is not None and sign * mkt >= 0.01:
         causes.append(("大盤系統性", f"加權指數 {mkt:+.2%}"))
-    if sox is not None:
+    if sox is not None and not oc_mode:
         hit = (sign * sox >= 0.02 and is_tech) or (ndx is not None and sign * ndx >= 0.015) or \
               (tsm is not None and sign * tsm >= 0.025 and is_tech)
         if hit:
@@ -173,12 +211,12 @@ def classify(kind, s, ctx, drivers, news_items, inst_row):
             causes.append(("籌碼反轉", f"看多主因為籌碼，但隔日三大法人轉賣超 {inst_row['total_net'] / 1000:,.0f} 張"))
     else:
         if s["ret"] >= 0.095:
-            causes.append(("漲停/題材", f"目標日漲停 {s['ret']:+.2%}"))
+            causes.append(("漲停/題材", f"目標日開→收大漲 {s['ret']:+.2%}" if oc_mode else f"目標日漲停 {s['ret']:+.2%}"))
         if inst_row is not None and s.get("avg_vol") and (inst_row.get("total_net") or 0) > 0.1 * s["avg_vol"]:
             causes.append(("法人同步買超", f"目標日三大法人買超 {inst_row['total_net'] / 1000:,.0f} 張"))
     ex = ctx.get("ext") or {}
     nr = ex.get("night_ret")
-    if nr is not None and sign * nr >= 0.01:
+    if nr is not None and sign * nr >= 0.01 and not oc_mode:
         causes.append(("期貨夜盤", f"預測後台指期夜盤 {nr:+.2%}"))
     asia = ex.get("asia")
     if asia is not None and sign * asia >= 0.015:
@@ -194,8 +232,12 @@ def classify(kind, s, ctx, drivers, news_items, inst_row):
     return causes
 
 
-def review_one(pred_date, target, news=True):
+def review_one(pred_date, target, news=True, mode="cc"):
+    """mode cc: close->close vs TAIEX (close-time list). mode oc: open->close vs universe mean (pre-open list)."""
     o = json.loads((PRED_DIR / f"{pred_date}.json").read_text())
+    stem = pred_date
+    if mode == "oc":
+        pred_date = o["pred_date"]
     preds = pd.DataFrame(o["predictions"]).set_index("code")
     px, inst, idx, industry, exd = _load_actual(target)
     mkt = idx.get("TAIEX")
@@ -203,6 +245,11 @@ def review_one(pred_date, target, news=True):
     us, us_dates = _us_between(pred_date, target)
     df = preds.join(px[["ret", "close", "open", "value"]].rename(columns={"close": "t_close", "open": "t_open"}), how="left")
     df = df[df.ret.notna()].copy()
+    if mode == "oc":
+        df["gap"] = df.t_open / (df.t_close / (1 + df.ret)) - 1
+        df["ret"] = df.t_close / df.t_open - 1
+        df = df[np.isfinite(df.ret)].copy()
+        mkt = float(df.ret.mean())
     df["excess"] = df.ret - (mkt or 0)
     df["sec_mean"] = df.groupby("industry").ret.transform("mean")
     df["sector_excess"] = df.sec_mean - (mkt or 0)
@@ -211,7 +258,12 @@ def review_one(pred_date, target, news=True):
     top_n = o["top_n"]
     top = df[df["rank"] <= top_n].sort_values("rank")
     ctx = {"mkt": mkt, "us": us, "target_day": dt.date.fromisoformat(target).day,
-           "ext": _ext_context(pred_date, target)}
+           "ext": _ext_context(pred_date, target), "mode": mode}
+    try:
+        from . import flows
+        ctx["flows"] = flows.review_context(pred_date, target, list(df.index))
+    except Exception as e:
+        ctx["flows"] = {}
     # metrics
     try:
         auc = float(roc_auc_score(df.y, df.prob))
@@ -226,8 +278,8 @@ def review_one(pred_date, target, news=True):
             "top_avg_ret": float(top.ret.mean()), "top_avg_excess": float(top.excess.mean()),
             "universe_avg_ret": float(df.ret.mean()), "auc": auc, "rank_ic": ic,
             "top_decile_excess": float(top_dec), "bottom_decile_excess": float(bot_dec),
-            "taiex": mkt, "otc": otc, "breadth": breadth,
-            "us_sox": us.get("sox"), "us_tsm": us.get("tsm_adr")}
+            "taiex": idx.get("TAIEX"), "bench": mkt, "otc": otc, "breadth": breadth,
+            "us_sox": us.get("sox"), "us_tsm": us.get("tsm_adr"), "mode": mode}
     for k in ("night_ret", "asia", "geo_z", "quake"):
         perf[k] = ctx["ext"].get(k)
 
@@ -248,7 +300,7 @@ def review_one(pred_date, target, news=True):
                 "exdiv": f"目標日除{e['kind']}（{e['amount']}元）" if e is not None else None,
                 "rev_note": (f"最新月營收YoY {rev.loc[code, 'yoy']:+.1f}%（{rev.loc[code, 'ym']}）"
                              if code in rev.index and pd.notna(rev.loc[code, "yoy"]) else None),
-                "avg_vol": avg_vol.get(code)}
+                "avg_vol": avg_vol.get(code), "gap": float(r["gap"]) if "gap" in r and pd.notna(r["gap"]) else None}
 
     analyses = []
     wrong = top[(top.excess < 0) | (top.ret < 0)]
@@ -271,9 +323,9 @@ def review_one(pred_date, target, news=True):
     sec = df.groupby("industry").agg(n=("ret", "size"), ret=("ret", "mean"), ex=("excess", "mean"),
                                      prob=("prob", "mean")).query("n>=3").sort_values("ex")
     md = render(o, perf, top, analyses, sec, us, us_dates, df)
-    path = REVIEW_REPORT_DIR / f"review_{pred_date}.md"
+    path = REVIEW_REPORT_DIR / f"review_{stem}.md"
     path.write_text(md)
-    _append_logs(perf, analyses, pred_date, target)
+    _append_logs(perf, analyses, pred_date, target, oc=(mode == "oc"))
     write_patterns()
     print(md)
     print(f"\n檢討報告：{path}\n累積紀錄：{LOG}\n錯誤模式統計：{PATTERNS}")
@@ -286,10 +338,16 @@ def _p(x, signed=True):
 
 
 def render(o, perf, top, analyses, sec, us, us_dates, df):
-    L = [f"# 預測檢討 — {perf['pred_date']} 的預測 vs {perf['target_date']} 實際結果", "", DISCLAIMER, "",
-         "## 總結", "",
+    oc = perf.get("mode") == "oc"
+    title = (f"# 盤前名單檢討（開盤→收盤）— {perf['target_date']}" if oc
+             else f"# 預測檢討 — {perf['pred_date']} 的預測 vs {perf['target_date']} 實際結果")
+    L = [title, "", DISCLAIMER, ""]
+    if oc:
+        L += ["> 盤前名單的目標是「開盤買、收盤賣」：以下報酬皆為目標日開盤→收盤，"
+              "「超額」相對於全體股票開→收平均（非加權指數）。", ""]
+    L += ["## 總結", "",
          f"- Top {o['top_n']}：上漲 {int(round(perf['top_hit_abs'] * len(top)))}/{len(top)}（{_p(perf['top_hit_abs'], False)}），"
-         f"勝過大盤 {int(round(perf['top_hit_excess'] * len(top)))}/{len(top)}（{_p(perf['top_hit_excess'], False)}）",
+         f"{'勝過全體開→收平均' if oc else '勝過大盤'} {int(round(perf['top_hit_excess'] * len(top)))}/{len(top)}（{_p(perf['top_hit_excess'], False)}）",
          f"- Top {o['top_n']} 平均報酬 {_p(perf['top_avg_ret'])}，平均超額 {_p(perf['top_avg_excess'])}；全體平均 {_p(perf['universe_avg_ret'])}",
          f"- 全體 {perf['n_universe']} 檔：AUC(跑贏中位數) {perf['auc']:.3f}，Rank IC {perf['rank_ic']:+.3f}；"
          f"最高十分位超額 {_p(perf['top_decile_excess'])} vs 最低十分位 {_p(perf['bottom_decile_excess'])}",
@@ -304,7 +362,8 @@ def render(o, perf, top, analyses, sec, us, us_dates, df):
         res = "✅" if r.excess > 0 and r.ret > 0 else ("🟡 勝大盤但下跌" if r.excess > 0 else ("🔴 大幅錯誤" if r.ret <= -0.03 else "❌"))
         L.append(f"| {int(r['rank'])} | {c} | {r['name']} | {r['industry']} | {r['prob']:.1%} | {_p(r.ret)} | "
                  f"{_p(r.excess)} | {_p(r.sector_excess)} | {_p(r.idio)} | {res} |")
-    L += ["", "報酬拆解：實際報酬 = 加權指數 + 產業超額（同產業平均−大盤）+ 個股特有（個股−產業平均）。", ""]
+    L += ["", ("報酬拆解（開→收）：實際報酬 = 全體平均 + 產業超額（同產業平均−全體平均）+ 個股特有（個股−產業平均）。" if oc else
+               "報酬拆解：實際報酬 = 加權指數 + 產業超額（同產業平均−大盤）+ 個股特有（個股−產業平均）。"), ""]
     wr = [a for a in analyses if a["kind"] == "wrong_pick"]
     mw = [a for a in analyses if a["kind"] == "missed_winner"]
     L += ["## 判斷錯誤的個股：根因分析", ""]
@@ -347,12 +406,13 @@ def _stock_block(a, driver_title):
     return L
 
 
-def _append_logs(perf, analyses, pred_date, target):
+def _append_logs(perf, analyses, pred_date, target, oc=False):
+    perf_p, log_p = (PERF_PRE, LOG_PRE) if oc else (PERF, LOG)
     pf = pd.DataFrame([perf])
-    if PERF.exists():
-        old = pd.read_csv(PERF, dtype={"pred_date": str})
+    if perf_p.exists():
+        old = pd.read_csv(perf_p, dtype={"pred_date": str})
         pf = pd.concat([old[old.pred_date != pred_date], pf])
-    pf.to_csv(PERF, index=False)
+    pf.to_csv(perf_p, index=False)
     rows = [{"pred_date": pred_date, "target_date": target, "kind": a["kind"], "code": a["code"], "name": a["name"],
              "industry": a["industry"], "rank": a["rank"], "prob": round(a["prob"], 4), "ret": round(a["ret"], 4),
              "excess": round(a["excess"], 4), "sector_excess": round(a["sector_excess"], 4),
@@ -361,10 +421,10 @@ def _append_logs(perf, analyses, pred_date, target):
              "driver_categories": ";".join(F.category(d["feature"]) for d in a["drivers"][:5]),
              "news_tags": ";".join(sorted({t for n in a["news"] for t in n["tags"]}))} for a in analyses]
     lg = pd.DataFrame(rows)
-    if LOG.exists():
-        old = pd.read_csv(LOG, dtype={"pred_date": str, "code": str})
+    if log_p.exists():
+        old = pd.read_csv(log_p, dtype={"pred_date": str, "code": str})
         lg = pd.concat([old[old.pred_date != pred_date], lg])
-    lg.to_csv(LOG, index=False)
+    lg.to_csv(log_p, index=False)
 
 
 def write_patterns():
