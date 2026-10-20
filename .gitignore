@@ -13,3 +13,4 @@ reports/backtest_daily.csv
 .DS_Store
 .devenv
 .venv
+!reports/archive/predictions/*.csv.gz
