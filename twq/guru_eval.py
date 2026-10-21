@@ -20,9 +20,18 @@ def run():
         done["champion"] = T.evaluate(T._oos(X, w, start), w)
         PATH.write_text(json.dumps(done, ensure_ascii=False, indent=1))
     champ = done["champion"]
+    for name in SETS:   # guardrail decision first (cheaper: 90 days)
+        k = f"tune|{name}"
+        if k not in done:
+            cw = W.set_(w, "feature_set", name)
+            ch = T.evaluate(T._oos(X, cw, start), cw)
+            ok, gain, msg = T._verdict(champ, ch)
+            done[k] = {**ch, "ok": ok, "msg": msg}
+            PATH.write_text(json.dumps(done, ensure_ascii=False, indent=1))
+            print(k, ok, msg, flush=True)
     for name in ["base"] + SETS:
         feats = F.FEATURE_SETS[name]
-        for label in ("y", "y_oc"):
+        for label in ("y",):
             k = f"long|{name}|{label}"
             if k in done:
                 continue
