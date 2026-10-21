@@ -209,29 +209,26 @@ def quakes(start, end):
 
 
 def news_counts(date: dt.date):
-    """Live Google News zh-TW keyword counts for the 24h ending at `date` (Taiwan)."""
-    import feedparser
-    rows = []
-    for topic, q in NEWS_TOPICS.items():
-        url = "https://news.google.com/rss/search?" + urllib.parse.urlencode(
-            {"q": f"{q} when:1d", "hl": "zh-TW", "gl": "TW", "ceid": "TW:zh-Hant"})
-        try:
-            f = feedparser.parse(requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20).content)
-            rows.append((date.isoformat(), topic, len(f.entries)))
-        except Exception:
-            pass
-        time.sleep(1.2)
-    return db.upsert("news_counts", ["date", "topic", "n"], rows)
+    """Google News zh-TW keyword counts for Taiwan date `date`.
+
+    auto-fix 2026-10-21: the old live version used `when:1d` and counted every RSS entry, which
+    almost always hits Google's ~100-item cap, while the backfill counts only items published on
+    that Taiwan date via an after/before window. The mismatch made every live day look like a
+    huge spike (Z≈4.8). Now the live collector uses exactly the backfill method and only for
+    completed days (d-3..d-1, overwritten each run): counting day d itself while d+1 is still empty
+    also inflates it toward the cap. Features use strict as-of (date < day), so nothing is lost."""
+    return news_counts_hist(date - dt.timedelta(days=3), date - dt.timedelta(days=1), refresh=True)
 
 
-def news_counts_hist(start: dt.date, end: dt.date):
+def news_counts_hist(start: dt.date, end: dt.date, refresh=False):
     """Backfill daily zh-TW Google News counts per topic (capped at ~100 items/query, so a rough intensity proxy)."""
     import feedparser
     from email.utils import parsedate_to_datetime
     tw = dt.timezone(dt.timedelta(hours=8))
     con = db.connect()
-    have = {(r[0], r[1]) for r in con.execute("SELECT date, topic FROM news_counts")}
+    have = set() if refresh else {(r[0], r[1]) for r in con.execute("SELECT date, topic FROM news_counts")}
     con.close()
+    total = 0
     d = end
     while d >= start:
         rows = []
@@ -259,10 +256,11 @@ def news_counts_hist(start: dt.date, end: dt.date):
                 except requests.RequestException:
                     time.sleep(10)
             time.sleep(2.0)
-        db.upsert("news_counts", ["date", "topic", "n"], rows)
-        if d.day == 1:
+        total += db.upsert("news_counts", ["date", "topic", "n"], rows) or 0
+        if d.day == 1 and not refresh:
             print("news_counts_hist at", d, flush=True)
         d -= dt.timedelta(days=1)
+    return total
 
 
 def update(start: dt.date, end: dt.date, verbose=True, gdelt_on=True):
