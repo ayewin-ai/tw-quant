@@ -16,6 +16,10 @@ fi
 echo "--- [1/5] 更新資料"
 $PY -m twq update --end "$TWDATE" --days 10 || echo "更新發生錯誤（繼續執行，可能使用舊資料）"
 
+echo "--- [1b/5] 季財報（MOPS 彙總報表）＋券商目標價新聞（即時累積）"
+timeout 900 $PY -c "from twq import fetch_fin; fetch_fin.refresh()" || echo "季財報更新失敗（沿用舊資料）"
+timeout 300 $PY -m twq.broker_news || echo "券商新聞收集失敗"
+
 echo "--- [2/5] 檢討尚未檢討、且目標日已有資料的預測"
 $PY -m twq review --no-update || echo "檢討失敗"
 

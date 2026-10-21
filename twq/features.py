@@ -53,6 +53,8 @@ BASE_FEATURES = list(FEATURE_INFO)
 FEATURE_INFO.update(FX.INFO)
 from . import flows as FL  # noqa: E402
 FEATURE_INFO.update(FL.INFO)
+from . import features_guru as GU  # noqa: E402
+FEATURE_INFO.update(GU.INFO)
 FEATURE_SETS = {
     "base": BASE_FEATURES,
     "+futures": BASE_FEATURES + FX.FUT,
@@ -65,6 +67,11 @@ FEATURE_SETS = {
     "+tech_events": BASE_FEATURES + FL.TECH_F,
     "+gov_funds": BASE_FEATURES + FL.NAT_F,
     "all_flow": BASE_FEATURES + [c for c in FL.ALL_F if c not in ("etf_w", "etf_n")],
+    "+academic_px": BASE_FEATURES + GU.PRICE_F,
+    "+rev_anom": BASE_FEATURES + GU.REV_F,
+    "+fundamental": BASE_FEATURES + GU.FUND_F,
+    "+guru": BASE_FEATURES + GU.GURU_F,
+    "all_guru": BASE_FEATURES + GU.ALL_F,
     "preopen_flow": BASE_FEATURES + FX.FUT + FX.GLOBAL + FX.EVENTS + FX.STOCK_EXT + FX.PREOPEN +
                     [c for c in FL.ALL_F if c not in ("etf_w", "etf_n")],
 }
@@ -272,6 +279,18 @@ def build(start=None, end=None, with_labels=True, min_hist=None, next_day=None):
     for b in ("rev_yoy", "rev_mom", "rev_yoy_chg", "rev_yoy3", "rev_fresh"):
         f[b] = rev_feats.get(b, pd.DataFrame(np.nan, index=days, columns=close.columns)).clip(-500, 2000) \
             if b != "rev_fresh" else rev_feats.get(b, pd.DataFrame(np.nan, index=days, columns=close.columns))
+
+    # academic / guru factors (twq/features_guru.py); never break the pipeline
+    try:
+        ind_g = info.set_index("code")["industry"].reindex(close.columns).fillna("未知")
+        f.update(GU.price_feats(adj, r, mkt_r1, ind_g))
+        f.update(GU.rev_feats(rev, days, close.columns))
+        f.update(GU.fund_feats(days, close.columns, close, f))
+    except Exception as e:
+        print("guru features unavailable:", e)
+    for c in GU.ALL_F:
+        if c not in f:
+            f[c] = pd.DataFrame(np.nan, index=days, columns=close.columns)
 
     # universe
     hist = traded.astype(int).rolling(60, min_periods=1).sum()
