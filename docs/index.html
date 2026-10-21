@@ -219,6 +219,19 @@
   <div id="tuneTable" class="scroll"></div>
 </section>
 
+<section id="grey">
+  <h2>5d. 灰色預測 GM(1,1)（影子模式）</h2>
+  <p>對每檔股票用最近 6 個收盤價建 GM(1,1) 灰色模型（累加生成 → 一階微分方程 dx/dt + a·x = b → 還原），預測下一交易日收盤價與漲跌方向；加權指數也同樣預測。
+  <b>只記錄、不影響每日名單與權重</b>，每天隔日對照實際結果（方向命中率、MAE、Rank IC、灰色前 10 名的開→收與收→收報酬，並與主模型和「延續昨日漲跌」「不變」兩個天真基準比較）。累積 30 個交易日後再決定是否啟用。</p>
+  <div id="greyProgress"></div>
+  <div class="chartbox"><canvas id="greyChart"></canvas></div>
+  <div id="greyTable"></div>
+  <h3>歷史回測（僅供參考，不作為啟用依據）</h3>
+  <div id="greyBt"></div>
+  <div class="chartbox"><canvas id="greyBtChart"></canvas></div>
+  <div id="greyLatest"></div>
+</section>
+
 <section id="latest">
   <h2>6. 最新預測</h2>
   <div id="latestPred"></div>

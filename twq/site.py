@@ -196,5 +196,10 @@ def build():
         if (REPORT_DIR / f).exists():
             shutil.copy2(REPORT_DIR / f, rep / f)
     meta["reports"] = {sub: sorted(p.name for p in (rep / sub).glob("*.md")) for sub in ("predict", "review")}
+    try:
+        from . import grey
+        _dump("grey.json", grey.site_payload())
+    except Exception as e:  # 影子模式失敗不影響網站
+        print("grey site payload failed:", e)
     _dump("meta.json", meta)
     print(f"site data written to {OUT}")

@@ -15,3 +15,4 @@ reports/backtest_daily.csv
 .venv
 !reports/archive/predictions/*.csv.gz
 data/raw_fin/
+!models/grey_backtest.json

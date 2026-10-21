@@ -31,13 +31,19 @@ if $PY -m twq has-data --date "$TWDATE"; then
 else
   echo "${TWDATE} 沒有交易資料（休市日、颱風假或資料尚未公布），略過預測。"
 fi
+echo "--- [3b] 灰色預測 GM(1,1) 影子模式（不影響名單；失敗不中斷）"
+if $PY -m twq has-data --date "$TWDATE"; then
+  timeout 300 $PY -m twq.grey all --date "$TWDATE" || echo "灰色預測失敗（略過）"
+else
+  timeout 300 $PY -m twq.grey evaluate || echo "灰色預測檢討失敗（略過）"
+fi
 echo "--- [4/5] 更新網站資料 docs/"
 $PY -m twq site || echo "網站資料產生失敗"
 echo "--- [5/5] 推送網站更新到 GitHub"
 if [[ -n "${TWQ_NOPUSH:-}" ]]; then
   echo "TWQ_NOPUSH 已設定：略過 commit/push（dry-run）"
-elif [[ -n "$(git status --porcelain docs reports models/validation.json config)" ]]; then
-  git add docs reports models/validation.json config && git commit -q -m "daily update ${TWDATE}" && git push -q origin main && echo "已推送" || echo "推送失敗"
+elif [[ -n "$(git status --porcelain docs reports models/validation.json models/grey_backtest.json config)" ]]; then
+  git add docs reports models/validation.json models/grey_backtest.json config && git commit -q -m "daily update ${TWDATE}" && git push -q origin main && echo "已推送" || echo "推送失敗"
 else
   echo "沒有變更，不推送"
 fi

@@ -284,3 +284,44 @@ function renderTuning(t) {
   el.innerHTML = h + '</tbody></table>';
   document.getElementById('guruNote').innerHTML = g.note || '';
 })();
+
+(async () => {
+  const g = await J('grey.json');
+  if (!g || !document.getElementById('greyTable')) return;
+  const f = (x, d = 3) => x == null ? 'NA' : (+x).toFixed(d);
+  const pc = x => x == null ? 'NA' : (x * 100).toFixed(1) + '%';
+  $('greyProgress').innerHTML = `<p><b>影子紀錄進度：${g.progress} / ${g.need_days} 個交易日已對照</b>（第一筆預測日 ${g.first_pred_date || 'NA'}，最新 ${g.latest_pred_date || 'NA'}）。未滿 ${g.need_days} 日前不啟用。</p>`;
+  const L = g.live || [];
+  if (L.length) {
+    let c1 = 1, c2 = 1, c3 = 1; const D = [], a = [], b = [], m = [];
+    for (const r of L) { c1 *= 1 + (r.top_cc ?? 0); c2 *= 1 + (r.main_top_cc ?? 0); c3 *= 1 + (r.mkt_cc ?? 0);
+      D.push(r.target_date); a.push(c1 - 1); b.push(c2 - 1); m.push(c3 - 1); }
+    charts.grey = new Chart($('greyChart'), {type: 'line', data: {labels: D, datasets: [
+      {label: '灰色前10 收→收累積', data: a, borderColor: '#f0883e'},
+      {label: '主模型前10 收→收累積', data: b, borderColor: '#58a6ff'},
+      {label: '全市場平均', data: m, borderColor: '#8b949e'}]},
+      options: {responsive: true, maintainAspectRatio: false, plugins: {title: {display: true, text: '影子模式即時累積報酬（未扣成本）'}}}});
+    $('greyTable').innerHTML = `<table><tr><th>預測日→目標日</th><th>檔數</th><th>方向命中</th><th>延續昨日命中</th><th>實際上漲比例</th><th>MAE</th><th>不變 MAE</th><th>Rank IC</th><th>灰色前10 開→收</th><th>灰色前10 收→收</th><th>主模型前10 收→收</th><th>市場 收→收</th><th>加權方向</th></tr>
+      ${L.slice().reverse().map(r => `<tr><td>${r.pred_date}→${r.target_date}</td><td>${r.n}</td><td>${pc(r.dir_hit)}</td><td>${pc(r.naive_dir_hit)}</td><td>${pc(r.up_share)}</td><td>${pc(r.mae)}</td><td>${pc(r.mae_nochange)}</td><td>${f(r.rank_ic)}</td><td class="${cls(r.top_oc)}">${pct(r.top_oc)}</td><td class="${cls(r.top_cc)}">${pct(r.top_cc)}</td><td class="${cls(r.main_top_cc)}">${pct(r.main_top_cc)}</td><td>${pct(r.mkt_cc)}</td><td>${r.taiex_dir_hit == null ? 'NA' : (r.taiex_dir_hit ? '✅' : '❌')}</td></tr>`).join('')}</table>`;
+  } else $('greyTable').innerHTML = '<p class="muted">尚無已對照的影子紀錄（第一筆預測需等下一交易日收盤後檢討）。</p>';
+  if (g.backtest) {
+    const s = g.backtest.summary, c = g.backtest.curve;
+    $('greyBt').innerHTML = `<p class="muted">回測期間 ${s.period}（${s.days} 個交易日），視窗 ${g.window} 日，成本 ${(g.cost * 100).toFixed(3)}%/次（開→收）。</p><table>
+      <tr><th>指標</th><th>GM(1,1)</th><th>天真基準</th></tr>
+      <tr><td>個股方向命中率</td><td>${pc(s.dir_hit)}</td><td>延續昨日 ${pc(s.naive_dir_hit)}；實際上漲比例 ${pc(s.up_share)}</td></tr>
+      <tr><td>個股報酬 MAE</td><td>${pc(s.mae)}</td><td>預測「不變」${pc(s.mae_nochange)}</td></tr>
+      <tr><td>Rank IC（t 值）</td><td>${f(s.rank_ic, 4)}（${f(s.rank_ic_t, 2)}）</td><td>延續昨日 ${f(s.naive_rank_ic, 4)}</td></tr>
+      <tr><td>灰色前10 開→收扣成本 累積</td><td>${pc(s.cum_top_oc_net)}</td><td></td></tr>
+      <tr><td>灰色前10 收→收 累積（毛）</td><td>${pc(s.cum_top_cc)}</td><td>全市場平均 ${pc(s.cum_mkt_cc)}</td></tr>
+      <tr><td>加權指數方向命中率</td><td>${pc(s.taiex_dir_hit)}</td><td>延續昨日 ${pc(s.taiex_naive_hit)}；永遠猜漲 ${pc(s.taiex_up)}</td></tr></table>`;
+    charts.greyBt = new Chart($('greyBtChart'), {type: 'line', data: {labels: c.dates, datasets: [
+      {label: '灰色前10 收→收(毛)', data: c.top_cc, borderColor: '#f0883e', pointRadius: 0},
+      {label: '灰色前10 開→收(扣成本)', data: c.top_oc_net, borderColor: '#f85149', pointRadius: 0},
+      {label: '全市場平均 收→收', data: c.mkt_cc, borderColor: '#8b949e', pointRadius: 0}]},
+      options: {responsive: true, maintainAspectRatio: false, plugins: {title: {display: true, text: 'GM(1,1) 歷史回測累積報酬'}}}});
+  }
+  if (g.latest_top) $('greyLatest').innerHTML = `<h3>最新灰色預測前 10 名（${g.latest_pred_date} 收盤資料，影子模式）</h3><table><tr><th>代號</th><th>名稱</th><th>收盤</th><th>GM 預測收盤</th><th>預測報酬</th><th>發展係數 a</th><th>擬合 MAPE</th></tr>
+    ${g.latest_top.map(r => `<tr><td>${r.code}</td><td>${r.name}</td><td>${r.close}</td><td>${f(r.grey_close, 2)}</td><td>${pct(r.grey_ret)}</td><td>${f(r.a, 4)}</td><td>${pc(r.fit_mape)}</td></tr>`).join('')}</table>
+    ${g.latest_taiex ? `<p>加權指數：${f(g.latest_taiex.close, 2)} → GM 預測 ${f(g.latest_taiex.grey_close, 2)}（${pct(g.latest_taiex.grey_ret)}）</p>` : ''}
+    <p class="muted">注意：GM(1,1) 對短窗口做指數外推，前幾名多半是近 6 日持續大漲（a 為負且大）的股票，本質是追漲。僅供研究，不構成投資建議。</p>`;
+})();
