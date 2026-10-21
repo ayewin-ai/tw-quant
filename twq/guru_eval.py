@@ -52,3 +52,23 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+
+NAMES = {"base": "基本（現行）", "+academic_px": "＋學術價格因子", "+rev_anom": "＋營收異常",
+         "+fundamental": "＋基本面（品質/價值/投資）", "+guru": "＋大師法則", "all_guru": "＋以上全部"}
+
+
+def site_payload(d):
+    long_ = []
+    for k, r in d.items():
+        if k.startswith("long|"):
+            _, s, lab = k.split("|")
+            long_.append({"set": s, "label": lab, **r})
+    tune = [{"set": k.split("|")[1], **r} for k, r in d.items() if k.startswith("tune|")]
+    per = next((r["period"] for r in long_), None)
+    passed = [NAMES[t["set"]] for t in tune if t.get("ok")]
+    note = d.get("note") or (("通過護欄並啟用：" + "、".join(passed)) if passed else
+                             "沒有任何一組通過護欄，全部維持停用（只計算、記錄，不影響每日名單）。") + \
+        " 研究報告代理（目標價/評等新聞）因無法回補歷史，目前只累積資料。⚠️ 僅供研究，不構成投資建議。"
+    return {"names": NAMES, "long": long_, "tune": tune, "long_period": f"{per[0]} ~ {per[1]}" if per else "",
+            "champion": d.get("champion"), "note": note}

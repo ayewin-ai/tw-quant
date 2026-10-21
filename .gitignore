@@ -14,3 +14,4 @@ reports/backtest_daily.csv
 .devenv
 .venv
 !reports/archive/predictions/*.csv.gz
+data/raw_fin/

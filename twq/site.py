@@ -109,6 +109,10 @@ def build():
             key = f.stem.replace("ablation_daily_", "")
             _dump(f"ablation_eq_{key.replace('+', 'p')}.json", {"dates": b.date.tolist(), "oc_net": b.oc_net_equity.tolist(),
                                                                "taiex": b.mkt_equity.tolist()})
+    ge = MODEL_DIR / "guru_eval.json"
+    if ge.exists():
+        from .guru_eval import site_payload
+        _dump("guru_eval.json", site_payload(json.loads(ge.read_text())))
     pre = sorted(PRED_DIR.glob("preopen_*.json"))
     if pre:
         o = json.loads(pre[-1].read_text())

@@ -269,3 +269,18 @@ function renderTuning(t) {
   $('tuneTable').innerHTML = `<table><tr><th>日期</th><th>結果</th><th>參數</th><th>舊</th><th>新</th><th>理由</th></tr>
     ${t.decisions.map(d => `<tr><td>${d.date}</td><td>${icon[d.decision] || d.decision}</td><td><code>${d.key || ''}</code></td><td>${d.old ?? ''}</td><td>${d.new ?? ''}</td><td>${d.reason || ''}</td></tr>`).join('')}</table>`;
 }
+
+(async () => {
+  const g = await J('guru_eval.json');
+  const el = document.getElementById('guruTable');
+  if (!g || !el) return;
+  const names = g.names || {};
+  const f = (x, d = 4) => x == null ? 'NA' : (+x).toFixed(d);
+  const pc = x => x == null ? 'NA' : (x * 100).toFixed(1) + '%';
+  let h = `<p class="muted">長期 walk-forward（${g.long_period || ''}，每 42 日重訓）</p><table><thead><tr><th>特徵組</th><th>目標</th><th>AUC</th><th>AUC(開→收)</th><th>Rank IC</th><th>Top-10 開→收(bp)</th><th>開→收累積(扣成本)</th><th>收→收累積(毛)</th><th>加權</th></tr></thead><tbody>`;
+  for (const r of g.long) h += `<tr><td>${names[r.set] || r.set}</td><td>${r.label}</td><td>${f(r.auc)}</td><td>${f(r.auc_oc)}</td><td>${f(r.rank_ic)}</td><td>${f(r.top_avg_oc_bp, 1)}</td><td>${pc(r.cum_oc_net)}</td><td>${pc(r.cum_cc_gross)}</td><td>${pc(r.cum_taiex)}</td></tr>`;
+  h += `</tbody></table><p class="muted">護欄測試（近 90 日、和每日自動調整相同門檻：開→收扣成本至少 +3 bp/日、超額不變差、AUC 不變差、前後半段都要改善）</p><table><thead><tr><th>特徵組</th><th>結果</th><th>說明</th></tr></thead><tbody>`;
+  for (const r of g.tune) h += `<tr><td>${names[r.set] || r.set}</td><td>${r.ok ? '✅ 啟用' : '❌ 不啟用'}</td><td>${r.msg}</td></tr>`;
+  el.innerHTML = h + '</tbody></table>';
+  document.getElementById('guruNote').innerHTML = g.note || '';
+})();
