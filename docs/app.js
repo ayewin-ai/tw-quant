@@ -325,3 +325,45 @@ function renderTuning(t) {
     ${g.latest_taiex ? `<p>加權指數：${f(g.latest_taiex.close, 2)} → GM 預測 ${f(g.latest_taiex.grey_close, 2)}（${pct(g.latest_taiex.grey_ret)}）</p>` : ''}
     <p class="muted">注意：GM(1,1) 對短窗口做指數外推，前幾名多半是近 6 日持續大漲（a 為負且大）的股票，本質是追漲。僅供研究，不構成投資建議。</p>`;
 })();
+
+// ===== 個股隔日收盤價預測查詢 =====
+(async function lookupInit() {
+  const out = document.getElementById('lkOut'); if (!out) return;
+  const L = await J('lookup.json');
+  if (!L) { out.innerHTML = '<p>預測資料暫時無法載入。</p>'; return; }
+  const dl = document.getElementById('lkList');
+  dl.innerHTML = Object.entries(L.s).map(([c, r]) => `<option value="${c} ${r.n}">`).join('');
+  const pct = v => v == null ? '—' : (v * 100).toFixed(2) + '%';
+  const find = q => {
+    q = (q || '').trim(); if (!q) return null;
+    const code = q.split(/\s+/)[0].toUpperCase();
+    if (L.s[code]) return code;
+    const hit = Object.entries(L.s).find(([c, r]) => r.n === q) || Object.entries(L.s).find(([c, r]) => r.n.includes(q));
+    return hit ? hit[0] : null;
+  };
+  const show = () => {
+    const q = document.getElementById('lkInput').value, c = find(q);
+    if (!c) { out.innerHTML = `<p style="color:#b91c1c">找不到「${q.replace(/[<>&]/g, '')}」。請輸入上市櫃股票代號（例如 2330）或名稱；資料只含 ${L.data_date} 有交易、且最近 10 日都有收盤價的 ${L.n_stocks} 檔。</p>`; return; }
+    const r = L.s[c];
+    let h = `<p><b>${c} ${r.n}</b>（${r.m}）　資料日 <b>${L.data_date}</b> 收盤 <b>${r.c}</b>　→　<b>預測</b>目標日 <b>${L.target_date}</b> 收盤</p>`;
+    h += '<div style="overflow-x:auto"><table><thead><tr><th>演算法</th><th>預測隔日收盤價</th><th>預測漲跌</th><th>方向 / 機率</th><th>歷史 MAE（漲跌幅）</th><th>歷史方向命中率</th><th>方法說明</th></tr></thead><tbody>';
+    for (const a of L.algos) {
+      const v = r.p[a.k];
+      const ret = v == null ? null : v / r.c - 1;
+      const dir = ret == null ? '—' : ret > 0.0005 ? '<span style="color:#dc2626">▲ 漲</span>' : ret < -0.0005 ? '<span style="color:#16a34a">▼ 跌</span>' : '— 平';
+      let pr = '';
+      if (a.k === 'lgbm_close' && r.pr != null) pr = `　上漲機率 ${(r.pr * 100).toFixed(1)}%（第 ${r.rk} 名）`;
+      if (a.k === 'lgbm_preopen' && r.pp != null) pr = `　跑贏機率 ${(r.pp * 100).toFixed(1)}%（第 ${r.pk} 名）`;
+      const s = a.acc || {};
+      const rng = s.range ? `<br><small>${s.src || a.src}，${s.range[0]}～${s.range[1]}</small>` : '';
+      h += `<tr><td>${a.name}</td><td><b>${v == null ? '本日未算' : v.toFixed(2)}</b> <small>（預測）</small></td><td>${pct(ret)}</td><td>${dir}${pr}</td><td>${pct(s.mae)}${rng}</td><td>${s.dir_hit == null ? '—' : pct(s.dir_hit)}</td><td><small>${a.note}</small></td></tr>`;
+    }
+    h += '</tbody></table></div>';
+    h += `<p><small>${L.note} 「不變」基準的 MAE 最低，代表其他方法目前都沒有比「猜不漲不跌」更準。主模型與盤前模型只涵蓋流動性篩選後的股票，其餘顯示「本日未算」。更新：${L.generated}（Bogota）。</small></p>`;
+    h += '<p style="color:#dc2626;font-weight:700">以上皆為模型預測，非實際價格，不構成投資建議。</p>';
+    out.innerHTML = h;
+  };
+  document.getElementById('lkBtn').onclick = show;
+  document.getElementById('lkInput').addEventListener('keydown', e => { if (e.key === 'Enter') show(); });
+  document.getElementById('lkInput').addEventListener('change', show);
+})();

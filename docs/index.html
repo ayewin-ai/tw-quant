@@ -14,7 +14,7 @@
   <div class="views" style="margin:4px 0 8px"><img src="https://visitor-badge.laobi.icu/badge?page_id=ayewin-ai.tw-quant&left_text=%E7%B8%BD%E7%80%8F%E8%A6%BD%E6%AC%A1%E6%95%B8&left_color=%23334155&right_color=%23ef4444" alt="總瀏覽次數" style="height:22px"></div>
   <p class="sub">用免費公開資料，每天預測隔日強勢股、隔天自動檢討錯在哪裡</p>
   <nav>
-    <a href="#honest">誠實結論</a><a href="#data">資料取得</a><a href="#features">特徵</a><a href="#algo">演算法</a>
+    <a href="#lookup">個股預測查詢</a><a href="#honest">誠實結論</a><a href="#data">資料取得</a><a href="#features">特徵</a><a href="#algo">演算法</a>
     <a href="#extdata">期貨/國際/事件</a><a href="#loop">每日流程</a><a href="#ablation">特徵比較</a><a href="#preopen">盤前更新</a><a href="#predhist">每日預測 vs 實際</a><a href="#tuning">模型調整</a><a href="#results">驗證與曲線</a><a href="#latest">最新預測</a><a href="#review">最新檢討</a>
     <a href="#reports">報告</a>
   </nav>
@@ -24,6 +24,17 @@
 <section class="warn" id="disclaimer">
   <strong>⚠️ 免責聲明：</strong>本網站與系統僅供研究與學習用途，<b>不構成任何投資建議</b>。
   模型預測準確度有限，過去表現不代表未來結果，投資請自行判斷並承擔風險。
+</section>
+
+<section id="lookup" class="lookup">
+  <h2>🔎 個股隔日收盤價預測查詢</h2>
+  <div style="background:#dc2626;color:#fff;font-weight:700;font-size:1.15em;padding:10px 14px;border-radius:8px;margin:8px 0">⚠️ 以下皆為模型預測，非實際價格，不構成投資建議</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <input id="lkInput" list="lkList" placeholder="輸入台股代號或名稱，例如 2330 或 台積電" style="font-size:1.05em;padding:6px 10px;min-width:260px">
+    <datalist id="lkList"></datalist>
+    <button id="lkBtn" style="font-size:1.05em;padding:6px 14px">預測</button>
+  </div>
+  <div id="lkOut" style="margin-top:10px"></div>
 </section>
 
 <section id="honest" class="honest">

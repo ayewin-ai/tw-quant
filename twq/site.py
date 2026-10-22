@@ -201,5 +201,10 @@ def build():
         _dump("grey.json", grey.site_payload())
     except Exception as e:  # 影子模式失敗不影響網站
         print("grey site payload failed:", e)
+    try:
+        from . import lookup
+        lookup.build()
+    except Exception as e:  # 查詢資料失敗不影響網站
+        print("lookup.json failed:", e)
     _dump("meta.json", meta)
     print(f"site data written to {OUT}")
