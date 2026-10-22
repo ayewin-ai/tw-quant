@@ -189,7 +189,7 @@ def classify(kind, s, ctx, drivers, news_items, inst_row):
     sign = -1 if kind == "wrong_pick" else 1
     exc, sec_exc = s["excess"], s["sector_excess"]
     if mkt is not None and sign * mkt >= 0.01:
-        causes.append(("大盤系統性", f"加權指數 {mkt:+.2%}"))
+        causes.append(("大盤系統性", (f"全體股票開→收平均 {mkt:+.2%}" if oc_mode else f"加權指數 {mkt:+.2%}")))
     if sox is not None and not oc_mode:
         hit = (sign * sox >= 0.02 and is_tech) or (ndx is not None and sign * ndx >= 0.015) or \
               (tsm is not None and sign * tsm >= 0.025 and is_tech)
