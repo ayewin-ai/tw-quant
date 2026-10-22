@@ -1,0 +1,2 @@
+pred_date,target_date,n,dir_hit,naive_dir_hit,up_share,mae,mae_nochange,mape_close,rank_ic,naive_rank_ic,top_cc,top_oc,top_oc_net,mkt_cc,mkt_oc,taiex_grey_ret,taiex_act_ret,taiex_dir_hit,main_top_cc,main_top_oc
+2026-10-21,2026-10-22,663,0.694915,0.261941,0.164869,0.0302249,0.0353601,0.0315434,0.259447,-0.254717,-0.0552275,-0.0533784,-0.0580884,-0.0284214,-0.0373421,-0.00779436,-0.0180503,1,-0.0361745,-0.0765554
