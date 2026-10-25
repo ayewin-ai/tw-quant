@@ -129,8 +129,11 @@ def build():
                 rows[r.code]["pr"] = round(float(r.prob), 4); rows[r.code]["rk"] = int(r.rank)
     pre_files = sorted(PRED.glob("preopen_*.csv.gz"))
     pre = None
+    from . import calendar as _cal
     for f in pre_files[::-1]:
         pre = load("preopen", f.name)
+        if pre is not None and not _cal.is_trading_day(pre.target_date.iloc[0]):
+            pre = None   # 目標日休市（如颱風假）的盤前預測已作廢
         if pre is not None:
             break
     preopen_meta = None
@@ -147,11 +150,8 @@ def build():
                 rows[r.code]["p"]["lgbm_preopen"] = round(rows[r.code]["c"] * (1 + gap_mean) * (1 + cal_oc[b]), 2)
                 rows[r.code]["pp"] = round(float(r.prob), 4); rows[r.code]["pk"] = int(r.rank)
         preopen_meta = {"pred_file": f.name}
-    if target is None:
-        d = dt.date.fromisoformat(last_date) + dt.timedelta(days=1)
-        while d.weekday() >= 5:
-            d += dt.timedelta(days=1)
-        target = d.isoformat()
+    if target is None or not _cal.is_trading_day(target):
+        target = _cal.next_trading_day(dt.date.fromisoformat(last_date)).isoformat()
 
     # 盤前模型準確度：用即時對照紀錄（若有）
     try:

@@ -30,6 +30,35 @@ def _dump(name, obj):
     (OUT / name).write_text(json.dumps(_clean(obj), ensure_ascii=False, separators=(",", ":")))
 
 
+def _calendar_payload():
+    import json as _j
+    from zoneinfo import ZoneInfo
+    from . import calendar as cal
+    today = dt.datetime.now(ZoneInfo("Asia/Taipei")).date()
+    days, lo, hi, _ = cal._db_info()
+    st = cal.status(today)
+    nxt = cal.next_trading_day(today if not st["open"] else today)  # 今天（台灣）之後的下一個交易日
+    ov = _j.loads(cal.OVERRIDES.read_text()) if cal.OVERRIDES.exists() else {}
+    unsched = []  # 資料區間內『行事曆說開市但沒資料』= 臨時休市（颱風假等）
+    d = dt.date.fromisoformat(lo)
+    while d <= dt.date.fromisoformat(hi):
+        if d.weekday() < 5 and cal.official_closed(d) is None and d.isoformat() not in days:
+            unsched.append(d.isoformat())
+        d += dt.timedelta(days=1)
+    ovmap = {c["date"]: c for c in ov.get("closures", [])}
+    chk = {str(y): cal.cross_check(y) for y in (today.year, today.year + 1)}
+    _dump("calendar.json", {
+        "today_tw": today.isoformat(), "today_open": st["open"], "today_why": st["why"], "today_source": st["source"],
+        "last_data_date": hi, "next_trading_day": nxt.isoformat() if nxt else None,
+        "upcoming_closures": cal.upcoming_closures(today, 120),
+        "unscheduled_closures": [{"date": x, "reason": ovmap.get(x, {}).get("reason", "資料區間內無成交資料（颱風假或證交所自訂休市，未逐一查證原因）"),
+                                  "source": ovmap.get(x, {}).get("source", "推定")} for x in unsched],
+        "cross_check": chk,
+        "sources": ["人事行政總處 政府行政機關辦公日曆表（data.gov.tw；公開鏡像 ruyut/TaiwanCalendar）",
+                    "臺灣證券交易所 市場開休市日期（openapi.twse.com.tw /holidaySchedule/holidaySchedule）",
+                    "臨時休市（颱風假等）：依證交所公告事後記入 config/calendar_overrides.json，其餘以實際成交資料為準"]})
+
+
 def build():
     OUT.mkdir(parents=True, exist_ok=True)
     meta = {"generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "disclaimer": DISCLAIMER,
@@ -119,6 +148,7 @@ def build():
         top = [{k: r.get(k) for k in ("rank", "code", "name", "industry", "prob", "close", "r1", "limitup")} |
                {"pos": [f"{f['label']} {f['value_str']}" for f in r["factors_pos"][:3]]} for r in o["predictions"][: o["top_n"]]]
         _dump("latest_preopen.json", {"target_date": o["target_date"], "pred_date": o["pred_date"],
+                                      "void": o.get("void", False), "void_reason": o.get("void_reason"),
                                       "overnight": o.get("overnight"), "model": o["model"], "top": top})
     try:
         from . import archive
@@ -206,5 +236,9 @@ def build():
         lookup.build()
     except Exception as e:  # 查詢資料失敗不影響網站
         print("lookup.json failed:", e)
+    try:
+        _calendar_payload()
+    except Exception as e:
+        print("calendar.json failed:", e)
     _dump("meta.json", meta)
     print(f"site data written to {OUT}")

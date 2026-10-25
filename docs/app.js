@@ -13,6 +13,8 @@ window.charts = {};
   const [abl, pre] = await Promise.all(['ablation.json', 'latest_preopen.json'].map(J));
   if (abl) renderAblation(abl);
   if (pre) renderPreopen(pre);
+  const cal = await J('calendar.json');
+  if (cal) renderCalendar(cal);
   const ph = await J('pred_history.json');
   if (ph) renderPredHistory(ph);
   const tu = await J('tuning.json');
@@ -174,8 +176,19 @@ async function renderAblation(a) {
     (best.cum_oc_net > best.cum_taiex ? '' : ' <b>仍未勝過大盤</b>，請勿當作投資依據。');
 }
 
+function renderCalendar(c) {
+  const up = c.upcoming_closures.slice(0, 8).map(x => `<li>${x.date}（${x.reason}；${x.source}）</li>`).join('') || '<li>近期無平日休市</li>';
+  const un = c.unscheduled_closures.slice().reverse().map(x => `<li>${x.date}：${x.reason}</li>`).join('');
+  $('calBox').innerHTML = `<p>台灣今天 <b>${c.today_tw}</b>：${c.today_open ? '<b class="pos">開市日</b>' : `<b class="neg">休市</b>（${c.today_why}）`}　｜　最近一筆資料日 <b>${c.last_data_date}</b>　｜　<b>下一個交易日 ${c.next_trading_day}</b></p>
+  <p class="muted">預測目標日一律取『下一個交易日』，跨假日時以真正開市日的實際結果比較（例如收盤後預測遇到休市，會和休市後第一個交易日比，而不是和不存在的日期比）。</p>
+  <h3>接下來的休市日（平日）</h3><ul>${up}</ul>
+  <h3>歷史上的臨時休市（官方日曆事前不會列出，颱風假等）</h3><ul>${un}</ul>
+  <p class="muted">資料來源：${c.sources.join('；')}。補班日（星期六）證交所不開市。遇到沒預料到的休市，當天不會產生預測，隔天流程會改用實際資料判斷，並把原本指向休市日的預測改指向下一個交易日；原本為休市日產生的盤前預測會標示作廢。</p>`;
+}
+
 function renderPreopen(p) {
   const o = p.overnight || {};
+  if (p.void) { $('latestPreopen').innerHTML = `<p><b class="neg">⚠️ 作廢：</b>${p.void_reason}。下一次盤前預測會在下一個交易日開盤前產生。</p>`; return; }
   $('latestPreopen').innerHTML = `<p>目標日 <b>${p.target_date}</b>（以 ${p.pred_date} 收盤資料＋隔夜資訊；特徵組 ${p.model.feature_set}，目標＝開盤→收盤）。</p>
   <p class="muted">台指期夜盤 ${pct(o.tx_night_ret)}、費半 ${pct(o.us_sox_on)}、台積電 ADR ${pct(o.us_tsm_on)}、那指 ${pct(o.us_ndx_on)}、美元/台幣 ${pct(o.usdtwd_on)}</p>
   <table><tr><th>#</th><th>代號</th><th>名稱</th><th>產業</th><th>機率</th><th>前日漲跌</th><th>主要因素</th></tr>

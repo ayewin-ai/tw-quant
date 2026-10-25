@@ -13,6 +13,10 @@ if [[ -z "${1:-}" && "$TWHOUR" -lt 15 ]]; then
   echo "提醒：台灣時間尚未 15:00，當日收盤資料可能還沒公布。"
 fi
 
+echo "--- [0/5] 交易日曆（人事行政總處＋證交所假日表＋臨時休市記錄）"
+$PY -c "from twq import calendar as C; C.ensure_fresh()" || echo "日曆更新失敗（沿用快取）"
+$PY -m twq.calendar status "$TWDATE" || true
+$PY -m twq.calendar retarget || true   # 目標日其實休市的舊預測改指向真正的下一交易日
 echo "--- [1/5] 更新資料"
 $PY -m twq update --end "$TWDATE" --days 10 || echo "更新發生錯誤（繼續執行，可能使用舊資料）"
 
@@ -29,7 +33,11 @@ echo "--- [3/5] 預測下一交易日"
 if $PY -m twq has-data --date "$TWDATE"; then
   $PY -m twq predict --date "$TWDATE" --no-update
 else
-  echo "${TWDATE} 沒有交易資料（休市日、颱風假或資料尚未公布），略過預測。"
+  if $PY -m twq.calendar is-open "$TWDATE" >/dev/null 2>&1; then
+    echo "${TWDATE} 行事曆為開市日但沒有交易資料（臨時休市如颱風假，或資料尚未公布），略過預測。若確定是臨時休市請執行：$PY -m twq.calendar add-closure ${TWDATE} 原因 來源"
+  else
+    echo "${TWDATE} 休市日（$($PY -m twq.calendar status "$TWDATE" | cut -c1-120)），略過預測。"
+  fi
 fi
 echo "--- [3b] 灰色預測 GM(1,1) 影子模式（不影響名單；失敗不中斷）"
 if $PY -m twq has-data --date "$TWDATE"; then

@@ -351,19 +351,6 @@ def trading_days():
 
 
 def next_trading_day(d: dt.date):
-    con = db.connect()
-    hol = {r[0]: r[1] for r in con.execute("SELECT date,name FROM holidays")}
-    have = {r[0] for r in con.execute("SELECT DISTINCT date FROM prices WHERE market='TWSE' AND date>?", (d.isoformat(),))}
-    con.close()
-    x = d
-    for _ in range(30):
-        x += dt.timedelta(days=1)
-        if x.isoformat() in have:
-            return x
-        if x.weekday() >= 5:
-            continue
-        name = hol.get(x.isoformat(), "")
-        if name and "開始交易" not in name and "最後交易" not in name:
-            continue
-        return x
-    return None
+    """下一個交易日：人事行政總處日曆 + 證交所假日表 + 臨時休市記錄 + 實際資料（見 twq/calendar.py）。"""
+    from . import calendar
+    return calendar.next_trading_day(d)

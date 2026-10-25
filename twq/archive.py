@@ -108,6 +108,15 @@ def update_vs_actual(top_n=10):
         pdte, tgt = p.pred_date.iloc[0], p.target_date.iloc[0]
         if (kind, pdte) in done:
             continue
+        from . import calendar as _cal
+        if not _cal.is_trading_day(tgt):
+            if kind == "preopen":   # 目標日休市（如颱風假）：盤前預測作廢，不產生任何比較列
+                continue
+            nt = _cal.next_trading_day(pdte)  # 收盤後預測改和『真正的下一交易日』比
+            if nt is None:
+                continue
+            tgt = nt.isoformat()
+            p["target_date"] = tgt
         px, taiex = _actuals(tgt)
         if px.empty:
             continue

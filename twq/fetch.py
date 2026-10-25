@@ -408,16 +408,14 @@ def us_markets(rng="3y"):
 
 # ---------------------------------------------------------------- orchestration
 def trading_day_candidates(start: dt.date, end: dt.date):
-    con = db.connect()
-    hol = {r[0]: r[1] for r in con.execute("SELECT date,name FROM holidays")}
-    con.close()
+    """要抓資料的候選日：依官方行事曆（人事行政總處＋證交所＋臨時休市記錄）排除休市日。
+    不使用『沒資料』來排除，避免資料尚未公布時不再重試；颱風假等事前未知的休市，抓不到就維持 pending 0。"""
+    from . import calendar
     d = end
     out = []
     while d >= start:
-        if d.weekday() < 5:
-            name = hol.get(d.isoformat(), "")
-            if not name or "開始交易" in name or "最後交易" in name:
-                out.append(d)
+        if calendar.official_closed(d) is None:
+            out.append(d)
         d -= dt.timedelta(days=1)
     return out  # newest first
 
@@ -459,6 +457,11 @@ def update(start: dt.date, end: dt.date, force=False, verbose=True, extras=True)
     t1 = threading.Thread(target=_run_jobs, args=(days, TWSE_JOBS, force, verbose))
     t2 = threading.Thread(target=_run_jobs, args=(days, TPEX_JOBS, force, verbose))
     t1.start(); t2.start(); t1.join(); t2.join()
+    try:
+        from . import calendar
+        calendar._clear()  # 新抓到的資料日要讓日曆看得到
+    except Exception:
+        pass
     if extras:
         update_extras(start, end, verbose)
 

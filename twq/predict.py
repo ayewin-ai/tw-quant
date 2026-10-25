@@ -179,8 +179,22 @@ def run_preopen(target: dt.date = None, update=True, top=None, limitup=None):
     from zoneinfo import ZoneInfo
     tdays = F.trading_days()
     tw_today = dt.datetime.now(ZoneInfo("Asia/Taipei")).date()
+    from . import calendar
+    calendar.ensure_fresh()
+    calendar.retarget_predictions()
     if target is None:
-        target = tw_today if tw_today.isoformat() > tdays[-1] else F.next_trading_day(dt.date.fromisoformat(tdays[-1]))
+        # 目標＝台灣『今天』若是交易日且尚無收盤資料；否則（休市日/已有資料）取最後資料日之後的下一交易日。
+        if tw_today.isoformat() > tdays[-1] and calendar.is_trading_day(tw_today):
+            target = tw_today
+        else:
+            target = calendar.next_trading_day(dt.date.fromisoformat(tdays[-1]))
+            if tw_today.isoformat() > tdays[-1] and target > tw_today:
+                print(f"台灣今天 {tw_today} 休市（{calendar.status(tw_today)['why']}），不產生盤前預測；"
+                      f"下一個交易日是 {target}。")
+                return None
+    elif not calendar.is_trading_day(target):
+        print(f"目標日 {target} 休市（{calendar.status(target)['why']}），不產生盤前預測。")
+        return None
     t = max(d for d in tdays if d < target.isoformat())
     if update:
         from . import fetch, fetch_ext
