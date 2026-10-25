@@ -225,7 +225,10 @@ def twse_holidays(year):
 TPEX = "https://www.tpex.org.tw/www/zh-tw"
 
 
-def tpex_prices(d: dt.date):
+TPEX_CODE_RE = r"\d{4}[A-Z]?|00\d{2,4}[A-Z]?|02\d{4}"   # 股票/特別股(8349A)/ETF/債券ETF/ETN(020xxx)；排除權證、可轉債
+
+
+def tpex_prices(d: dt.date, only_re=None):
     j = get(f"{TPEX}/afterTrading/dailyQuotes", "tpex", TPEX_SLEEP, {"date": d.strftime("%Y/%m/%d"), "response": "json"})
     if j is None:
         return None
@@ -237,8 +240,10 @@ def tpex_prices(d: dt.date):
     rows = []
     for r in tabs[0]["data"]:
         code = r[0].strip()
-        if not re.fullmatch(r"\d{4}|00\d{2,4}[A-Z]?", code):
+        if not re.fullmatch(TPEX_CODE_RE, code):
             continue  # skip warrants / convertible bonds
+        if only_re and not re.fullmatch(only_re, code):
+            continue
         close = num(r[2])
         ch = num(r[3])
         ret = None

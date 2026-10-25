@@ -345,20 +345,40 @@ function renderTuning(t) {
   const L = await J('lookup.json');
   if (!L) { out.innerHTML = '<p>預測資料暫時無法載入。</p>'; return; }
   const dl = document.getElementById('lkList');
-  dl.innerHTML = Object.entries(L.s).map(([c, r]) => `<option value="${c} ${r.n}">`).join('');
+  const ents = Object.entries(L.s);
+  dl.innerHTML = ents.map(([c, r]) => `<option value="${c} ${r.n}">`).join('');
   const pct = v => v == null ? '—' : (v * 100).toFixed(2) + '%';
+  // 全形→半形、去空白、轉大寫（代號可含英文字母：00940、00400A、2881B、020029、8349A…）
+  const norm = t => (t || '').replace(/[\uFF01-\uFF5E]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)).replace(/\u3000/g, ' ').trim();
+  const esc = t => String(t).replace(/[<>&"]/g, '');
+  let cand = [];
   const find = q => {
-    q = (q || '').trim(); if (!q) return null;
-    const code = q.split(/\s+/)[0].toUpperCase();
-    if (L.s[code]) return code;
-    const hit = Object.entries(L.s).find(([c, r]) => r.n === q) || Object.entries(L.s).find(([c, r]) => r.n.includes(q));
-    return hit ? hit[0] : null;
+    q = norm(q); cand = []; if (!q) return null;
+    const first = q.split(/\s+/)[0].toUpperCase();
+    if (L.s[first]) return first;
+    const u = q.toUpperCase();
+    if (L.s[u]) return u;
+    const ql = q.toLowerCase();
+    const exact = ents.filter(([c, r]) => r.n.toLowerCase() === ql);
+    if (exact.length === 1) return exact[0][0];
+    // 代號前綴（例如輸入 0094 → 00940、00941…）或名稱包含
+    const pre = ents.filter(([c]) => c.startsWith(u));
+    const inc = ents.filter(([c, r]) => r.n.toLowerCase().includes(ql) || (first.length >= 2 && c.includes(first)));
+    const seen = new Set(); cand = [];
+    for (const e of [...exact, ...pre, ...inc]) if (!seen.has(e[0])) { seen.add(e[0]); cand.push(e); }
+    return cand.length === 1 ? cand[0][0] : null;
   };
   const show = () => {
     const q = document.getElementById('lkInput').value, c = find(q);
-    if (!c) { out.innerHTML = `<p style="color:#b91c1c">找不到「${q.replace(/[<>&]/g, '')}」。請輸入上市櫃股票代號（例如 2330）或名稱；資料只含 ${L.data_date} 有交易、且最近 10 日都有收盤價的 ${L.n_stocks} 檔。</p>`; return; }
+    if (!c) {
+      const qq = norm(q).split(/\s+/)[0].toUpperCase();
+      if (cand.length) { out.innerHTML = `<p>找到 ${cand.length} 檔符合「${esc(q)}」，請點選：</p><p>` + cand.slice(0, 40).map(([k, r]) => `<a href="#lookup" data-c="${k}" class="lkPick" style="margin-right:12px;white-space:nowrap">${k} ${r.n}</a>`).join('') + (cand.length > 40 ? ' …' : '') + '</p>';
+        out.querySelectorAll('.lkPick').forEach(a => a.onclick = ev => { ev.preventDefault(); document.getElementById('lkInput').value = a.dataset.c + ' ' + L.s[a.dataset.c].n; show(); }); return; }
+      if (L.gone && L.gone[qq]) { const g = L.gone[qq]; out.innerHTML = `<p><b>${qq} ${g[0]}</b>（${g[1]}）：最後一筆收盤價在 <b>${g[2]}</b>，已超過 20 個交易日沒有成交（可能已下市、終止上市或暫停交易），因此不提供預測。</p>`; return; }
+      out.innerHTML = `<p style="color:#b91c1c">找不到「${esc(q)}」。涵蓋範圍：上市、上櫃股票／ETF／ETN／特別股，以及興櫃（共 ${L.n_stocks} 檔，資料日 ${L.data_date}）；<b>不含</b>權證、可轉債、期貨。可輸入代號（含英文字母，例如 00940、00400A、2881B）或名稱的一部分。</p>`; return; }
     const r = L.s[c];
-    let h = `<p><b>${c} ${r.n}</b>（${r.m}）　資料日 <b>${L.data_date}</b> 收盤 <b>${r.c}</b>　→　<b>預測</b>目標日 <b>${L.target_date}</b> 收盤</p>`;
+    let h = r.esb ? `<p><b>${c} ${r.n}</b>（興櫃）　${r.ld} 最新成交價 <b>${r.c}</b>　→　目標日 <b>${L.target_date}</b></p><p class="muted">興櫃只有當日行情、沒有歷史收盤序列，除「不變」基準外其餘演算法皆為資料不足。</p>`
+      : `<p><b>${c} ${r.n}</b>（${r.m}）　${r.ld ? `<span style="color:#b45309">資料日 ${L.data_date} 無成交，以最後成交日 <b>${r.ld}</b> 的收盤為準：</span>` : `資料日 <b>${L.data_date}</b> `}收盤 <b>${r.c}</b>　→　<b>預測</b>目標日 <b>${L.target_date}</b> 收盤</p>`;
     h += '<div style="overflow-x:auto"><table><thead><tr><th>演算法</th><th>預測隔日收盤價</th><th>預測漲跌</th><th>方向 / 機率</th><th>歷史 MAE（漲跌幅）</th><th>歷史方向命中率</th><th>方法說明</th></tr></thead><tbody>';
     for (const a of L.algos) {
       const v = r.p[a.k];
@@ -369,10 +389,10 @@ function renderTuning(t) {
       if (a.k === 'lgbm_preopen' && r.pp != null) pr = `　跑贏機率 ${(r.pp * 100).toFixed(1)}%（第 ${r.pk} 名）`;
       const s = a.acc || {};
       const rng = s.range ? `<br><small>${s.src || a.src}，${s.range[0]}～${s.range[1]}</small>` : '';
-      h += `<tr><td>${a.name}</td><td><b>${v == null ? '本日未算' : v.toFixed(2)}</b> <small>（預測）</small></td><td>${pct(ret)}</td><td>${dir}${pr}</td><td>${pct(s.mae)}${rng}</td><td>${s.dir_hit == null ? '—' : pct(s.dir_hit)}</td><td><small>${a.note}</small></td></tr>`;
+      h += `<tr><td>${a.name}</td><td>${v == null ? `<span style="color:#6b7280"><b>${(r.x && r.x[a.k]) ? (/資料不足/.test(r.x[a.k]) ? '資料不足' : '本日未算') : '本日未算'}</b><br><small>${(r.x && r.x[a.k]) || '本日未算'}</small></span>` : `<b>${v.toFixed(2)}</b> <small>（預測）</small>`}</td><td>${pct(ret)}</td><td>${dir}${pr}</td><td>${pct(s.mae)}${rng}</td><td>${s.dir_hit == null ? '—' : pct(s.dir_hit)}</td><td><small>${a.note}</small></td></tr>`;
     }
     h += '</tbody></table></div>';
-    h += `<p><small>${L.note} 「不變」基準的 MAE 最低，代表其他方法目前都沒有比「猜不漲不跌」更準。主模型與盤前模型只涵蓋流動性篩選後的股票，其餘顯示「本日未算」。更新：${L.generated}（Bogota）。</small></p>`;
+    h += `<p><small>${L.note} 「不變」基準的 MAE 最低，代表其他方法目前都沒有比「猜不漲不跌」更準。主模型與盤前模型只涵蓋流動性篩選後的普通股，其餘會寫出未計算的原因（資料不足／本日未算）。更新：${L.generated}（Bogota）。</small></p>`;
     h += '<p style="color:#dc2626;font-weight:700">以上皆為模型預測，非實際價格，不構成投資建議。</p>';
     out.innerHTML = h;
   };
@@ -380,3 +400,4 @@ function renderTuning(t) {
   document.getElementById('lkInput').addEventListener('keydown', e => { if (e.key === 'Enter') show(); });
   document.getElementById('lkInput').addEventListener('change', show);
 })();
+

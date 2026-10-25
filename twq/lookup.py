@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .config import DB_PATH, MODEL_DIR, REPORT_DIR, ROOT
+from .config import DB_PATH, MODEL_DIR, REPORT_DIR, ROOT, MIN_AVG_VALUE, MIN_PRICE
 from .grey import gm11_next, WIN as GWIN
 
 OUT = ROOT / "docs" / "data" / "lookup.json"
@@ -62,16 +62,76 @@ def _calib(prob_pct, ret):
     return pd.Series(ret).groupby(b).mean().reindex(range(NB)).fillna(0).values
 
 
+STALE_DAYS = 20        # 最後成交日距資料日超過 N 個交易日的代號視為已下市/暫停交易，不列入選單
+NEED = {"unchanged": 1, "momentum1": 2, "ma5": 5, "linear10": LIN_WIN, "grey": GWIN}
+ESB_CACHE = ROOT / "config" / "emerging_latest.json"
+
+
+def _emerging():
+    """興櫃(TPEx emerging) 最新行情：只有當日價，沒有歷史序列。抓不到就用上次快取。"""
+    import requests
+    rows = None
+    try:
+        r = requests.get("https://www.tpex.org.tw/openapi/v1/tpex_esb_latest_statistics", timeout=25,
+                         headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        rows = r.json()
+        ESB_CACHE.write_text(json.dumps(rows, ensure_ascii=False))
+    except Exception as e:
+        print("emerging fetch failed:", e)
+        if ESB_CACHE.exists():
+            rows = json.loads(ESB_CACHE.read_text())
+    out = {}
+    for x in rows or []:
+        try:
+            code = x["SecuritiesCompanyCode"].strip()
+            px = float(x.get("LatestPrice") or 0) or float(x.get("PreviousAveragePrice") or 0)
+            if px > 0:
+                d = str(x.get("Date") or "")
+            if len(d) == 7 and d.isdigit():
+                d = f"{int(d[:3]) + 1911}-{d[3:5]}-{d[5:]}"
+            out[code] = (x["CompanyName"].strip(), px, d)
+        except Exception:
+            continue
+    return out
+
+
+def _lgbm_reason(code, px_rows, r_last, dates):
+    """為什麼 LightGBM 主模型沒有評分這檔：逐項檢查與 features.build 相同的篩選條件。"""
+    import re
+    if not re.fullmatch(r"[1-9]\d{3}", code):
+        return "非一般普通股（ETF／債券ETF／ETN／特別股／TDR 等）不在 LightGBM 訓練範圍，只提供價格型演算法"
+    why = []
+    if r_last["date"] != dates[-1] or not (r_last["volume"] or 0) > 0:
+        why.append("資料日無成交")
+    if (r_last["close"] or 0) < MIN_PRICE:
+        why.append(f"股價 {r_last['close']:g} < {MIN_PRICE:g} 元")
+    v = px_rows["value"].tail(20)
+    av = float(v.fillna(0).sum() / 20)
+    if av < MIN_AVG_VALUE:
+        why.append(f"20 日均成交值 {av/1e4:,.0f} 萬 < {MIN_AVG_VALUE/1e4:,.0f} 萬")
+    h = int(((px_rows["volume"] > 0) & px_rows["close"].notna()).tail(60).sum())
+    if h < 40:
+        why.append(f"近 60 日只有 {h} 日有成交（<40，新上市或常無成交）")
+    return "未通過流動性/歷史篩選：" + "；".join(why) if why else "符合條件，但最新預測檔未包含此檔"
+
+
 def build():
     con = sqlite3.connect(DB_PATH)
     dates = [r[0] for r in con.execute("select distinct date from prices order by date desc limit ?", (BT_DAYS + 15,))][::-1]
-    px = pd.read_sql_query("select date, code, name, market, close from prices where date >= ? and close > 0",
-                           con, params=(dates[0],))
+    pxa = pd.read_sql_query("select date, code, name, market, close, volume, value from prices where date >= ?",
+                            con, params=(dates[0],))
     con.close()
+    px = pxa[pxa.close > 0]
     last_date = dates[-1]
     C = px.pivot(index="date", columns="code", values="close").reindex(dates)
-    info = px[px.date == last_date].set_index("code")[["name", "market"]]
-    codes = [c for c in info.index if C[c].iloc[-LIN_WIN:].notna().all()]
+    # 選單 = 近 STALE_DAYS 個交易日內至少有一筆收盤價的所有代號（含 ETF/ETN/特別股/上櫃）
+    recent = set(px[px.date >= dates[-STALE_DAYS]].code)
+    latest_meta = px.sort_values("date").groupby("code").tail(1).set_index("code")
+    info = latest_meta.loc[sorted(recent)][["name", "market"]]
+    # 太久沒成交（已下市等）：只記名稱與最後成交日，用於搜尋時提示
+    gone = {c: [r.name, r.market, r.date] for c, r in latest_meta.iterrows() if c not in recent}
+    codes = [c for c in info.index if C[c].iloc[-LIN_WIN:].notna().all()]   # 完整 10 日：用於回測統計與主要預測
 
     # ---- 回測：價格型演算法（近 BT_DAYS 日，全部股票）
     acc = {k: {"mae": [], "hit": [], "n": 0} for k in ["unchanged", "momentum1", "ma5", "linear10", "grey"]}
@@ -102,13 +162,40 @@ def build():
     stats["lgbm_close"]["range"] = [oos.date.min(), oos.date.max()]
     stats["lgbm_close"]["auc_note"] = "機率>0.5 方向命中率 %.1f%%" % (100 * np.mean((oos.prob > 0.5) == (oos.next_ret > 0)))
 
-    W = C[codes].values[-LIN_WIN:].T
-    preds = _algos_from_matrix(W)
-    last = W[:, -1]
     rows = {}
-    for j, c in enumerate(codes):
-        rows[c] = {"n": info.at[c, "name"], "m": info.at[c, "market"], "c": float(last[j]),
-                   "p": {k: (round(float(v[j]), 2) if np.isfinite(v[j]) else None) for k, v in preds.items()}}
+    pxg = {c: g for c, g in pxa.sort_values("date").groupby("code")}
+    for c in info.index:
+        ser = C[c].dropna()
+        v = ser.values[-GWIN - 5:]
+        n = len(v)
+        ld = ser.index[-1]
+        p, x = {}, {}
+        for k, need in NEED.items():
+            if n < need or (k == "grey" and not (v[-GWIN:] > 0).all()):
+                p[k] = None
+                x[k] = f"資料不足：只有 {n} 筆收盤價，需 {need} 筆" if n < need else "收盤價含 0，無法建模"
+                continue
+            P = v[None, :]
+            val = _algos_from_matrix(np.concatenate([np.full((1, max(0, LIN_WIN - n)), np.nan), P], axis=1)
+                                     if n < LIN_WIN else P)[k][0]
+            p[k] = round(float(val), 2) if np.isfinite(val) else None
+            if p[k] is None:
+                x[k] = "本日未算（數值無法計算）"
+        row = {"n": info.at[c, "name"], "m": info.at[c, "market"], "c": float(v[-1]), "p": p}
+        if ld != last_date:
+            row["ld"] = ld          # 最後成交日（非資料日 → 資料日無成交）
+        if x:
+            row["x"] = x
+        rows[c] = row
+    # 興櫃：只有最新價（無歷史序列），其餘演算法顯示資料不足
+    for c, (nm, pxv, ed) in _emerging().items():
+        if c in rows:
+            continue
+        rows[c] = {"n": nm, "m": "興櫃", "c": pxv, "ld": ed, "esb": 1,
+                   "p": {k: (round(pxv, 2) if k == "unchanged" else None) for k in NEED},
+                   "x": {k: "興櫃只有當日行情（無歷史收盤序列），資料不足" for k in NEED if k != "unchanged"},
+                   "lr": "興櫃股票不在 LightGBM 訓練範圍（無日收盤序列、無三大法人／融資券資料）"}
+    n_scored_universe = len(codes)
 
     target = None
     def load(kind, fname):
@@ -150,6 +237,21 @@ def build():
                 rows[r.code]["p"]["lgbm_preopen"] = round(rows[r.code]["c"] * (1 + gap_mean) * (1 + cal_oc[b]), 2)
                 rows[r.code]["pp"] = round(float(r.prob), 4); rows[r.code]["pk"] = int(r.rank)
         preopen_meta = {"pred_file": f.name}
+    # 沒有被主模型/盤前模型評分的代號：寫出原因
+    for c, r in rows.items():
+        if r.get("esb"):
+            r["x"]["lgbm_close"] = r["x"]["lgbm_preopen"] = r.pop("lr")
+            continue
+        g = pxg.get(c)
+        if g is None:
+            continue
+        if "lgbm_close" not in r["p"]:
+            last_row = g[g.close > 0].iloc[-1]
+            rs = _lgbm_reason(c, g, last_row, dates)
+            r.setdefault("x", {})["lgbm_close"] = rs
+            r["x"]["lgbm_preopen"] = rs if "未通過" in rs or "不在" in rs else "盤前模型本日未算（盤前預測檔未包含此檔）"
+        elif "lgbm_preopen" not in r["p"]:
+            r.setdefault("x", {})["lgbm_preopen"] = f"盤前模型本日未算（盤前預測於開盤前產生，目前尚無 {target or '下一交易日'} 的盤前預測檔）"
     if target is None or not _cal.is_trading_day(target):
         target = _cal.next_trading_day(dt.date.fromisoformat(last_date)).isoformat()
 
@@ -183,7 +285,7 @@ def build():
             s["range"] = bt_range
         a["acc"] = s
     payload = {"data_date": last_date, "target_date": target, "generated": dt.datetime.now().isoformat(timespec="minutes"),
-               "algos": algos, "preopen": preopen_meta, "n_stocks": len(rows),
+               "algos": algos, "preopen": preopen_meta, "n_stocks": len(rows), "n_full": n_scored_universe, "n_gone": len(gone), "gone": gone,
                "note": "預測報酬誤差 MAE 為「預測漲跌幅 − 實際漲跌幅」的平均絕對值；方向命中率不計平盤；回測排除單日 |報酬|>10.5% 的除權息/異常日。",
                "s": rows}
     OUT.parent.mkdir(parents=True, exist_ok=True)
