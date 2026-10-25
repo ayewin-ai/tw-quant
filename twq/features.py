@@ -57,6 +57,8 @@ from . import features_guru as GU  # noqa: E402
 FEATURE_INFO.update(GU.INFO)
 from . import features_risk as FR  # noqa: E402
 FEATURE_INFO.update(FR.INFO)
+from . import features_cmdty as CM  # noqa: E402
+FEATURE_INFO.update(CM.INFO)
 FEATURE_SETS = {
     "base": BASE_FEATURES,
     "+futures": BASE_FEATURES + FX.FUT,
@@ -75,6 +77,10 @@ FEATURE_SETS = {
     "+guru": BASE_FEATURES + GU.GURU_F,
     "all_guru": BASE_FEATURES + GU.ALL_F,
     "+gs_risk": BASE_FEATURES + FR.RISK_F,
+    "+cmdty": BASE_FEATURES + CM.CMDTY_F,
+    "+cmdty_lite": BASE_FEATURES + CM.CMDTY_LITE,
+    "preopen_cmdty": BASE_FEATURES + FX.FUT + FX.GLOBAL + FX.EVENTS + FX.STOCK_EXT + FX.PREOPEN + CM.CMDTY_F + CM.CMDTY_ON,
+    "preopen_cmdty_lite": BASE_FEATURES + FX.FUT + FX.GLOBAL + FX.EVENTS + FX.STOCK_EXT + FX.PREOPEN + CM.CMDTY_LITE + CM.CMDTY_LITE_ON,
     "preopen_flow": BASE_FEATURES + FX.FUT + FX.GLOBAL + FX.EVENTS + FX.STOCK_EXT + FX.PREOPEN +
                     [c for c in FL.ALL_F if c not in ("etf_w", "etf_n")],
 }
@@ -322,6 +328,7 @@ def build(start=None, end=None, with_labels=True, min_hist=None, next_day=None):
     X["close"] = close.stack(future_stack=True).reindex(X.index).values
     X["value"] = val.stack(future_stack=True).reindex(X.index).values
     X = FX.stock_level(X)
+    X = CM.add_features(X, days, r, mkt_r1, ind.reindex(r.columns))
     try:
         X = FL.add_features(X)
     except Exception as e:  # never break the pipeline

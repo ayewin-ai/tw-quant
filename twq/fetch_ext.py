@@ -30,6 +30,10 @@ WORLD = {
     "^N225": "nikkei", "^KS11": "kospi", "^HSI": "hsi", "000001.SS": "shanghai", "^GDAXI": "dax",
     "^STOXX50E": "stoxx50", "ES=F": "es_fut", "NQ=F": "nq_fut", "TWD=X": "usdtwd", "^TNX": "us10y",
     "DX-Y.NYB": "dxy", "CL=F": "oil", "GC=F": "gold",
+    # 商品期貨與匯率擴充（features_cmdty.py）。Yahoo 日K：商品=美東該日結算，FX=紐約收盤，皆早於台股隔日開盤
+    "SI=F": "silver", "PL=F": "platinum", "HG=F": "copper", "BZ=F": "brent", "NG=F": "natgas",
+    "ZC=F": "corn", "ZS=F": "soybean", "ZW=F": "wheat",
+    "JPY=X": "usdjpy", "CNY=X": "usdcny", "EURUSD=X": "eurusd", "KRW=X": "usdkrw",
 }
 
 GDELT_TOPICS = {
