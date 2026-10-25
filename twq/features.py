@@ -55,6 +55,8 @@ from . import flows as FL  # noqa: E402
 FEATURE_INFO.update(FL.INFO)
 from . import features_guru as GU  # noqa: E402
 FEATURE_INFO.update(GU.INFO)
+from . import features_risk as FR  # noqa: E402
+FEATURE_INFO.update(FR.INFO)
 FEATURE_SETS = {
     "base": BASE_FEATURES,
     "+futures": BASE_FEATURES + FX.FUT,
@@ -72,6 +74,7 @@ FEATURE_SETS = {
     "+fundamental": BASE_FEATURES + GU.FUND_F,
     "+guru": BASE_FEATURES + GU.GURU_F,
     "all_guru": BASE_FEATURES + GU.ALL_F,
+    "+gs_risk": BASE_FEATURES + FR.RISK_F,
     "preopen_flow": BASE_FEATURES + FX.FUT + FX.GLOBAL + FX.EVENTS + FX.STOCK_EXT + FX.PREOPEN +
                     [c for c in FL.ALL_F if c not in ("etf_w", "etf_n")],
 }
@@ -288,7 +291,11 @@ def build(start=None, end=None, with_labels=True, min_hist=None, next_day=None):
         f.update(GU.fund_feats(days, close.columns, close, f))
     except Exception as e:
         print("guru features unavailable:", e)
-    for c in GU.ALL_F:
+    try:  # gs-quant 風格風險/技術指標 (twq/features_risk.py)
+        f.update(FR.risk_feats(adj, r, mkt_r1, ind))
+    except Exception as e:
+        print("risk features unavailable:", e)
+    for c in GU.ALL_F + FR.RISK_F:
         if c not in f:
             f[c] = pd.DataFrame(np.nan, index=days, columns=close.columns)
 
