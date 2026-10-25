@@ -245,5 +245,10 @@ def build():
         _dump("market_factors.json", market_factors.payload())
     except Exception as e:
         print("market_factors.json failed:", e)
+    try:
+        from . import risk as _risk
+        _dump("risk.json", _risk.payload())
+    except Exception as e:
+        print("risk.json failed:", e)
     _dump("meta.json", meta)
     print(f"site data written to {OUT}")

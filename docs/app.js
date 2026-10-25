@@ -430,3 +430,55 @@ function renderTuning(t) {
   document.getElementById('mfNote').innerHTML = `<b>結論：</b>${m.decision} <span class="muted">${m.sources}</span> ⚠️ 僅供研究，不構成投資建議。`;
 })();
 
+// ===== 風險與分散化（gs-quant × Dalio）=====
+(async () => {
+  const r = await J('risk.json');
+  const el = document.getElementById('rkCorr');
+  if (!r || !el) return;
+  const f = (x, d = 2) => x == null ? 'NA' : (+x).toFixed(d);
+  const pp = (x, d = 1) => x == null ? 'NA' : (x * 100).toFixed(d) + '%';
+  const nm = r.feature_names || {};
+  // ① 特徵評估
+  let h = '';
+  const fe = r.feature_eval || {};
+  if ((fe.tune || []).length) {
+    h += `<table><thead><tr><th>模型</th><th>特徵組</th><th>結果</th><th>說明（相對現行組）</th></tr></thead><tbody>` +
+      fe.tune.map(x => `<tr><td>${x.model === 'close' ? '收盤後模型' : '盤前模型'}</td><td>${nm[x.set] || x.set}</td><td>${x.ok && x.enabled !== false ? '✅ 啟用' : x.ok ? '⚠️ 短窗過、不啟用' : '❌ 不啟用'}</td><td>${x.msg}</td></tr>`).join('') + '</tbody></table>';
+  }
+  if ((fe.long || []).length) {
+    h += `<p class="muted">長期 walk-forward（2025-07 起，每 42 日重訓）</p><table><thead><tr><th>模型</th><th>特徵組</th><th>AUC</th><th>AUC(開→收)</th><th>Rank IC</th><th>Top-10 開→收(bp)</th><th>開→收累積(扣成本)</th></tr></thead><tbody>` +
+      fe.long.map(x => `<tr><td>${x.model === 'close' ? '收盤後' : '盤前'}</td><td>${nm[x.set] || x.set}</td><td>${f(x.auc, 4)}</td><td>${f(x.auc_oc, 4)}</td><td>${f(x.rank_ic, 4)}</td><td>${f(x.top_avg_oc_bp, 1)}</td><td>${pp(x.cum_oc_net)}</td></tr>`).join('') + '</tbody></table>';
+  }
+  h += `<p class="muted">13 個風險特徵：EWMA 波動(λ=0.94)與短/長比、60 日 VaR95 / CVaR95、60 日最大回撤、下行偏差、對大盤 beta 與 R²、對產業 beta、Bollinger %B、MACD 柱、偏態、winsorized z。</p>`;
+  document.getElementById('rkFeat').innerHTML = h;
+  // ② 相關矩陣
+  const cols = r.cols, N = r.names, C = r.corr;
+  const col = v => v == null ? '#fff' : v >= 0 ? `rgba(220,38,38,${Math.min(1, v) * .75})` : `rgba(37,99,235,${Math.min(1, -v) * .75})`;
+  el.innerHTML = `<table style="font-size:.78em"><thead><tr><th></th>${cols.map((c, i) => `<th style="max-width:70px">${N[c]}</th>`).join('')}</tr></thead><tbody>` +
+    cols.map((c, i) => `<tr><th style="text-align:left;white-space:nowrap">${N[c]}</th>${C[i].map(v => `<td style="background:${col(v)};text-align:center">${v == null ? '—' : v.toFixed(2)}</td>`).join('')}</tr>`).join('') + '</tbody></table>' +
+    `<p class="muted">期間 ${r.period[0]} ~ ${r.period[1]}；各流來源：模型流=walk-forward OOS（含成本前）、灰色=影子回測、其餘由資料庫價量計算。</p>` +
+    `<table><thead><tr><th>流</th><th>天數</th><th>年化報酬流夏普</th><th>年化波動</th><th>最大回撤</th><th>VaR95(1日)</th><th>CVaR95(1日)</th></tr></thead><tbody>` +
+    cols.map(c => { const s = r.stats[c] || {}; return `<tr><td>${N[c]}</td><td>${s.n || ''}</td><td>${f(s.sharpe)}</td><td>${pp(s.vol_ann)}</td><td>${pp(s.mdd)}</td><td>${pp(s.var95)}</td><td>${pp(s.cvar95)}</td></tr>`; }).join('') + '</tbody></table><p class="muted">⚠️ 夏普為毛值（未扣手續費/證交稅）；「收→收」類（收盤 Top-10、灰色、前日漲幅前10）含收盤鎖死漲停、實務買不到的股票，數字偏高、不可成交；開→收類較貼近可成交。</p>';
+  const dv = r.diversification || {}, dn = {system: '系統自己的 3 條流（收盤/盤前/灰色）', all: '全部流', sectors: '5 個產業群', 'system+taiex+0050': '系統 3 流 + 加權 + 0050'};
+  document.getElementById('rkDiv').innerHTML = `<h3>分散化比率與「有效獨立賭注」</h3><table><thead><tr><th>集合</th><th>流數 N</th><th>平均兩兩相關</th><th>有效獨立賭注（參與比 / 熵）</th><th>分散化比率：等權</th><th>反波動</th><th>風險平價</th></tr></thead><tbody>` +
+    Object.keys(dv).map(k => { const d = dv[k]; return `<tr><td>${dn[k] || k}</td><td>${d.n}</td><td>${f(d.avg_corr)}</td><td><b>${f(d.pr, 1)}</b> / ${f(d.entropy, 1)}</td><td>${f(d.div_ratio_equal)}</td><td>${f(d.div_ratio_invvol)}</td><td>${f(d.div_ratio_rp)}</td></tr>`; }).join('') + '</tbody></table>' +
+    `<p class="muted">分散化比率 = Σ(wᵢσᵢ)/σₚ（=1 代表完全相關、越大越分散）。有效獨立賭注 = 相關矩陣特徵值的參與比 (Σλ)²/Σλ²（N 條完全不相關→N；完全相關→1）。</p>` +
+    (r.holy_grail ? `<p><b>Dalio 聖杯檢驗：</b>${r.holy_grail.note} 系統各流平均夏普 ${f(r.holy_grail.sr_per_stream)}、平均相關 ${f(r.holy_grail.avg_corr)}；若 N=15 且 ρ=0，組合夏普會是單流的 ${f(r.holy_grail.curve_rho0[14].sharpe / (r.holy_grail.sr_per_stream || 1), 1)} 倍（風險降 ${pp(r.holy_grail.curve_rho0[14].risk_reduction, 0)}）；ρ=0.3 時風險只降 ${pp(r.holy_grail.curve_rho30[14].risk_reduction, 0)}。</p>` : '');
+  // ③ 加權評估
+  const we = r.weight_eval, wb = document.getElementById('rkWeights');
+  if (we && we.g90) {
+    const row = (k, x, lg) => `<tr><td>${x.name}</td><td>${x.ok == null ? '（現行基準）' : x.ok && x.enabled !== false ? '✅ 啟用' : x.ok ? '⚠️ 短窗過、長窗反向→不啟用' : '❌ 不通過'}</td><td>${f(x.net_oc_bp, 1)}</td><td>${f(x.excess_bp, 1)}</td><td>${f(x.net_h1_bp, 1)} / ${f(x.net_h2_bp, 1)}</td><td>${pp(x.vol_bp / 1e4, 2)}</td><td>${f(x.sharpe)}</td><td>${lg ? `${f(lg.net_oc_bp, 1)} / ${f(lg.excess_bp, 1)}（${lg.days} 日）` : ''}</td><td>${x.msg || ''}</td></tr>`;
+    wb.innerHTML = `<table><thead><tr><th>方式</th><th>護欄</th><th>開→收淨 bp/日</th><th>超額 bp</th><th>前/後半 bp</th><th>日波動</th><th>夏普</th><th>長窗 淨/超額 bp</th><th>說明</th></tr></thead><tbody>` +
+      Object.keys(we.g90).filter(k => k[0] !== '_').map(k => row(k, we.g90[k], (we.long || {})[k])).join('') + '</tbody></table>' +
+      `<p class="muted">在每日 Top-10 上改變權重（或從 Top-20 池挑相關性較低的 10 檔）；用該日以前 60 日報酬估共變異數（向等相關收縮）。排序不變，因此 AUC 不適用。Top-10 平均兩兩相關 ${f(we.g90._picks_diag?.avg_pair_corr)}，有效獨立賭注僅 ${f(we.g90._picks_diag?.eff_bets_pr, 1)} / 10。</p>`;
+  }
+  // ④ 今日
+  const td = r.today || {}, tb = document.getElementById('rkToday');
+  tb.innerHTML = Object.keys(td).map(k => { const t = td[k]; return `<h4>${k === 'close' ? '收盤後模型' : '盤前模型'}（預測日 ${t.pred_date} → ${t.target_date}；回看 ${t.lookback_days} 日）</h4>` +
+    `<p>Top-${t.n} 平均兩兩相關 <b>${f(t.avg_pair_corr)}</b>；有效獨立賭注 <b>${f(t.eff_bets_pr, 1)}</b>；產業集中度 HHI ${f(t.industry_hhi)}。</p>` +
+    `<table><thead><tr><th>加權</th><th>年化波動</th><th>1日 VaR95</th><th>1日 CVaR95</th><th>歷史最大回撤</th><th>分散化比率</th><th>Beta</th><th>最大權重</th></tr></thead><tbody>` +
+    Object.values(t.schemes).map(s => `<tr><td>${s.name}</td><td>${pp(s.vol_ann)}</td><td>${pp(s.var95_1d, 2)}</td><td>${pp(s.cvar95_1d, 2)}</td><td>${pp(s.mdd_hist)}</td><td>${f(s.div_ratio)}</td><td>${f(s.beta)}</td><td>${pp(s.max_weight)}</td></tr>`).join('') + '</tbody></table>' +
+    `<table><thead><tr><th>代號</th><th>名稱</th><th>產業</th><th>年化波動</th><th>Beta</th><th>等權風險貢獻</th><th>風險平價權重</th></tr></thead><tbody>` +
+    t.picks.map(p => `<tr><td>${p.code}</td><td>${p.name}</td><td>${p.industry || ''}</td><td>${pp(t.stock_vol_ann[p.code])}</td><td>${f(t.stock_beta[p.code])}</td><td>${pp(t.schemes.equal.risk_contrib[p.code])}</td><td>${pp(t.schemes.risk_parity.weights[p.code])}</td></tr>`).join('') + '</tbody></table>'; }).join('');
+  document.getElementById('rkNote').innerHTML = `<b>結論：</b>${r.decision || '評估中'} ⚠️ 僅供研究，不構成投資建議。`;
+})();

@@ -77,6 +77,7 @@ FEATURE_SETS = {
     "+guru": BASE_FEATURES + GU.GURU_F,
     "all_guru": BASE_FEATURES + GU.ALL_F,
     "+gs_risk": BASE_FEATURES + FR.RISK_F,
+    "preopen_gs_risk": BASE_FEATURES + FX.FUT + FX.GLOBAL + FX.EVENTS + FX.STOCK_EXT + FX.PREOPEN + FR.RISK_F,
     "+cmdty": BASE_FEATURES + CM.CMDTY_F,
     "+cmdty_lite": BASE_FEATURES + CM.CMDTY_LITE,
     "preopen_cmdty": BASE_FEATURES + FX.FUT + FX.GLOBAL + FX.EVENTS + FX.STOCK_EXT + FX.PREOPEN + CM.CMDTY_F + CM.CMDTY_ON,

@@ -18,6 +18,7 @@ if ! $PY -m twq.calendar is-open "$TPDATE" >/dev/null 2>&1; then
   exit 0
 fi
 $PY -m twq preopen ${1:+--target "$1"} || { echo "盤前更新失敗"; exit 1; }
+timeout 300 $PY -m twq.risk report > /dev/null || echo "投組風險報告失敗（略過）"
 $PY -m twq site || echo "網站資料產生失敗"
 if [[ -n "${TWQ_NOPUSH:-}" ]]; then
   echo "TWQ_NOPUSH 已設定：略過 commit/push"

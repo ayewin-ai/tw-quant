@@ -163,6 +163,11 @@ run_daily.sh                  每日一鍵流程
 - 新增的期貨/國際/事件特徵是否有用，請看 `reports/validation.md` 的 Ablation 表；結果誠實列出，沒有勝過大盤就是沒有。
 - 事件資料是粗略代理：GDELT 報導量與 Google News 計數不等於事件嚴重度，新聞量歷史不完整。
 
+### 7b. 風險與分散化（gs-quant 概念 × Dalio 不相關報酬流）
+- `twq/features_risk.py`：13 個個股風險特徵（EWMA 波動、VaR/CVaR、最大回撤、beta/R²、Bollinger、MACD、偏態、winsorized z）。概念來自 [goldmansachs/gs-quant](https://github.com/goldmansachs/gs-quant)（Apache-2.0；需 GS 帳號才能用其 API，故未安裝、只借概念，程式自行以 numpy/pandas 撰寫）。護欄結果：收盤後短窗通過但長窗矛盾、盤前未通過 → 僅報告、不進模型。
+- `twq/risk.py`：報酬流相關矩陣、分散化比率、有效獨立賭注、Dalio 聖杯曲線；反波動/風險平價(ERC)/低相關加權與低相關選股；每日 Top-N 投組風險報告（`python -m twq.risk report` → `reports/risk/`）。概念來自 [LAIN-21/dalio_uncorrelated_returns](https://github.com/LAIN-21/dalio_uncorrelated_returns)。`python -m twq.risk eval` 以與 `twq tune` 相同護欄評估加權方式（結果見網站「風險與分散化」與 CHANGELOG）。
+- `twq/features_cmdty.py`、`twq/market_factors.py`：商品期貨/匯率因子（盤前模型啟用）。
+
 ## 8. 網站（GitHub Pages）
 
 `docs/` 是純靜態網站（Chart.js / marked 由 CDN 載入，不需要伺服器），說明演算法、資料取得方式，並畫出

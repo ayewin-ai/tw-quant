@@ -14,7 +14,7 @@
   <div class="views" style="margin:4px 0 8px"><img src="https://visitor-badge.laobi.icu/badge?page_id=ayewin-ai.tw-quant&left_text=%E7%B8%BD%E7%80%8F%E8%A6%BD%E6%AC%A1%E6%95%B8&left_color=%23334155&right_color=%23ef4444" alt="總瀏覽次數" style="height:22px"></div>
   <p class="sub">用免費公開資料，每天預測隔日強勢股、隔天自動檢討錯在哪裡</p>
   <nav>
-    <a href="#calendar">交易日曆</a><a href="#mktfactors">商品匯率因子</a><a href="#lookup">個股預測查詢</a><a href="#honest">誠實結論</a><a href="#data">資料取得</a><a href="#features">特徵</a><a href="#algo">演算法</a>
+    <a href="#calendar">交易日曆</a><a href="#mktfactors">商品匯率因子</a><a href="#risk">風險與分散化</a><a href="#lookup">個股預測查詢</a><a href="#honest">誠實結論</a><a href="#data">資料取得</a><a href="#features">特徵</a><a href="#algo">演算法</a>
     <a href="#extdata">期貨/國際/事件</a><a href="#loop">每日流程</a><a href="#ablation">特徵比較</a><a href="#preopen">盤前更新</a><a href="#predhist">每日預測 vs 實際</a><a href="#tuning">模型調整</a><a href="#results">驗證與曲線</a><a href="#latest">最新預測</a><a href="#review">最新檢討</a>
     <a href="#reports">報告</a>
   </nav>
@@ -210,6 +210,22 @@
   <p id="mfNote"></p>
 </section>
 
+<section id="risk">
+  <h2>5e. 風險與分散化（2026-10 新增）：gs-quant 風險分析 × Dalio「不相關報酬流」</h2>
+  <p><b>參考來源與致謝：</b>
+    <a href="https://github.com/goldmansachs/gs-quant">Goldman Sachs gs-quant</a>（Apache-2.0；需 GS 帳號才能用其 API，故<b>未安裝、未複製程式</b>，只借用它時間序列/風險模型的<i>概念</i>：EWMA 波動、VaR/CVaR、最大回撤、beta/R²、Bollinger/MACD、winsorized z-score、因子風險分解）；
+    <a href="https://github.com/LAIN-21/dalio_uncorrelated_returns">LAIN-21/dalio_uncorrelated_returns</a>（Dalio「聖杯」：15 條不相關報酬流可降風險約 80%；風險平價、反波動加權、分散化比率、有效獨立賭注）。程式為本專案以 numpy/pandas 自行重寫（<code>twq/risk.py</code>、<code>twq/features_risk.py</code>）。</p>
+  <h3>① 個股風險特徵（gs-quant 概念）→ 是否進模型</h3>
+  <div id="rkFeat"><p class="muted">評估結果產生中…</p></div>
+  <h3>② 報酬流相關矩陣（紅=正相關、藍=負相關；日報酬，以實現日對齊）</h3>
+  <div id="rkCorr" style="overflow-x:auto"><p class="muted">載入中…</p></div>
+  <div id="rkDiv"></div>
+  <h3>③ 加權方式與低相關選股回測（護欄與 <code>twq tune</code> 相同：近 90 日、開→收扣成本、前後半段；另做 2025-07 起長窗）</h3>
+  <div id="rkWeights"><p class="muted">評估結果產生中…</p></div>
+  <h3>④ 今日 Top-N 投組風險報告</h3>
+  <div id="rkToday"></div>
+  <p id="rkNote"></p>
+</section>
 <section id="preopen">
   <h2>6b. 最新盤前更新預測</h2>
   <div id="latestPreopen"><p class="muted">尚無盤前更新。</p></div>

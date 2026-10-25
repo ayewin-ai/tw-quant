@@ -46,6 +46,8 @@ else
   timeout 300 $PY -m twq.grey evaluate || echo "灰色預測檢討失敗（略過）"
 fi
 echo "--- [4/5] 更新網站資料 docs/"
+echo "--- [3c] 投組風險報告（VaR/CVaR/相關/有效獨立賭注；僅描述，失敗不中斷）"
+timeout 300 $PY -m twq.risk report > /dev/null || echo "投組風險報告失敗（略過）"
 $PY -m twq site || echo "網站資料產生失敗"
 echo "--- [5/5] 推送網站更新到 GitHub"
 if [[ -n "${TWQ_NOPUSH:-}" ]]; then
