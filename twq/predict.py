@@ -168,7 +168,8 @@ def overnight_context(X, ds):
     row = X.xs(ds, level="date").iloc[0]
     keys = ["tx_day_ret", "tx_basis", "fini_oi", "fini_oi_chg", "pc_oi", "nikkei_r", "kospi_r", "hsi_r",
             "tx_night_ret", "us_sox_on", "us_tsm_on", "us_ndx_on", "es_on", "usdtwd_on", "g_risk_on", "quake_max72",
-            "quake_max_on"]
+            "quake_max_on", "oil_on", "cm_gold_on", "cm_silver_on", "cm_platinum_on", "cm_copper_on", "cm_brent_on",
+            "cm_natgas_on", "cm_dxy_on", "cm_usdjpy_on", "cm_usdcny_on", "cm_usdkrw_on", "cm_eurusd_on"]
     return {k: (None if k not in row or pd.isna(row[k]) else float(row[k])) for k in keys}
 
 
@@ -208,7 +209,7 @@ def run_preopen(target: dt.date = None, update=True, top=None, limitup=None):
             except Exception as e:
                 print("preopen update warning:", e)
     X = F.build(end=t, next_day=target.isoformat())
-    booster, meta = get_model(X, t, fset="preopen", label="y_oc", tag="preopen")
+    booster, meta = get_model(X, t, fset=W.load().get("preopen_feature_set") or "preopen", label="y_oc", tag="preopen")
     out = score(X, t, target, booster, meta, top, limitup, mode="preopen")
     if out["overnight"].get("tx_night_ret") is None:
         print("⚠️ 尚未取得台指期夜盤資料（夜盤約台灣 05:00 結束），夜盤特徵為缺值。")
@@ -238,6 +239,11 @@ def _overnight_lines(on, pre):
     if pre:
         L.insert(1, f"- **夜盤與隔夜**：台指期夜盤 {_pct(g('tx_night_ret'))}、費半 {_pct(g('us_sox_on'))}、台積電ADR {_pct(g('us_tsm_on'))}、"
                     f"那指 {_pct(g('us_ndx_on'))}、S&P期貨 {_pct(g('es_on'))}、美元/台幣 {_pct(g('usdtwd_on'))}、GDELT 事件風險 {g('g_risk_on') or 'NA'}")
+        L.insert(2, f"- **隔夜商品**：黃金 {_pct(g('cm_gold_on'))}、白銀 {_pct(g('cm_silver_on'))}、白金 {_pct(g('cm_platinum_on'))}、"
+                    f"銅 {_pct(g('cm_copper_on'))}、WTI {_pct(g('oil_on'))}、布蘭特 {_pct(g('cm_brent_on'))}、天然氣 {_pct(g('cm_natgas_on'))}")
+        L.insert(3, f"- **隔夜匯率**：美元/台幣 {_pct(g('usdtwd_on'))}、美元指數 {_pct(g('cm_dxy_on'))}、美元/日圓 {_pct(g('cm_usdjpy_on'))}、"
+                    f"美元/人民幣 {_pct(g('cm_usdcny_on'))}、美元/韓元 {_pct(g('cm_usdkrw_on'))}、歐元/美元 {_pct(g('cm_eurusd_on'))}"
+                    "（商品=美東結算價、匯率=紐約收盤）")
     else:
         L.append("- 注意：預測後當晚的美股與台指期夜盤尚未反映；請看開盤前的「盤前更新預測」(twq preopen)。")
     L.append("- ⚠️漲停追高：前一日漲停的股票隔日常開高或買不到，歷史上是主要的誤判來源之一。")

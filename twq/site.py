@@ -240,5 +240,10 @@ def build():
         _calendar_payload()
     except Exception as e:
         print("calendar.json failed:", e)
+    try:
+        from . import market_factors
+        _dump("market_factors.json", market_factors.payload())
+    except Exception as e:
+        print("market_factors.json failed:", e)
     _dump("meta.json", meta)
     print(f"site data written to {OUT}")

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-10-20",
+  "updated": "2026-10-25",
   "model": {
     "learning_rate": 0.03,
     "num_leaves": 31,
@@ -11,7 +11,7 @@
   },
   "recency_half_life_days": null,
   "feature_set": "base",
-  "preopen_feature_set": "preopen",
+  "preopen_feature_set": "preopen_cmdty",
   "feature_group_multipliers": {},
   "score": {
     "limitup_penalty": 0.0,

@@ -401,3 +401,32 @@ function renderTuning(t) {
   document.getElementById('lkInput').addEventListener('change', show);
 })();
 
+// ===== 商品期貨與匯率因子 =====
+(async () => {
+  const m = await J('market_factors.json');
+  const el = document.getElementById('mfMoves');
+  if (!m || !el) return;
+  const pc = x => x == null ? '—' : `<span style="color:${x > 0 ? '#dc2626' : x < 0 ? '#16a34a' : 'inherit'}">${(x * 100).toFixed(2)}%</span>`;
+  el.innerHTML = `<table><thead><tr><th>類別</th><th>項目</th><th>最新日</th><th>價格/水準</th><th>1 日</th><th>5 日</th><th>20 日</th></tr></thead><tbody>` +
+    m.moves.map(r => `<tr><td>${r.group}</td><td>${r.name}</td><td>${r.date}</td><td>${r.last.toFixed(r.last < 20 ? 4 : 2)}</td><td>${pc(r.d1)}</td><td>${pc(r.d5)}</td><td>${pc(r.d20)}</td></tr>`).join('') +
+    '</tbody></table><p class="muted">紅=上漲、綠=下跌（台股慣例）。</p>';
+  const bn = m.beta_names || {};
+  const keys = Object.keys(bn);
+  document.getElementById('mfBetas').innerHTML = `<table><thead><tr><th>產業</th><th>檔數</th>${keys.map(k => `<th>${bn[k]}</th>`).join('')}</tr></thead><tbody>` +
+    m.betas.map(r => `<tr><td>${r.industry}</td><td>${r.n}</td>${keys.map(k => `<td>${r[k] == null ? '—' : r[k].toFixed(2)}</td>`).join('')}</tr>`).join('') + '</tbody></table>';
+  const nm = m.names || {};
+  const f = (x, d = 4) => x == null ? 'NA' : (+x).toFixed(d);
+  const pp = x => x == null ? 'NA' : (x * 100).toFixed(1) + '%';
+  let h = '';
+  if (m.tune.length) {
+    h += `<table><thead><tr><th>模型</th><th>特徵組</th><th>結果</th><th>說明（相對現行組）</th></tr></thead><tbody>` +
+      m.tune.map(r => `<tr><td>${r.model === 'close' ? '收盤後模型' : '盤前模型'}</td><td>${nm[r.set] || r.set}</td><td>${r.ok ? '✅ 啟用' : '❌ 不啟用'}</td><td>${r.msg}</td></tr>`).join('') + '</tbody></table>';
+  }
+  if (m.long.length) {
+    h += `<p class="muted">長期 walk-forward（2025-07 起，每 42 日重訓）</p><table><thead><tr><th>模型</th><th>特徵組</th><th>AUC</th><th>AUC(開→收)</th><th>Rank IC</th><th>Top-10 開→收(bp)</th><th>開→收累積(扣成本)</th><th>加權</th></tr></thead><tbody>` +
+      m.long.map(r => `<tr><td>${r.model === 'close' ? '收盤後' : '盤前'}</td><td>${nm[r.set] || r.set}</td><td>${f(r.auc)}</td><td>${f(r.auc_oc)}</td><td>${f(r.rank_ic)}</td><td>${f(r.top_avg_oc_bp, 1)}</td><td>${pp(r.cum_oc_net)}</td><td>${pp(r.cum_taiex)}</td></tr>`).join('') + '</tbody></table>';
+  }
+  document.getElementById('mfEval').innerHTML = h || '<p class="muted">評估結果產生中…</p>';
+  document.getElementById('mfNote').innerHTML = `<b>結論：</b>${m.decision} <span class="muted">${m.sources}</span> ⚠️ 僅供研究，不構成投資建議。`;
+})();
+

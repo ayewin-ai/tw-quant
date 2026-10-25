@@ -14,7 +14,7 @@
   <div class="views" style="margin:4px 0 8px"><img src="https://visitor-badge.laobi.icu/badge?page_id=ayewin-ai.tw-quant&left_text=%E7%B8%BD%E7%80%8F%E8%A6%BD%E6%AC%A1%E6%95%B8&left_color=%23334155&right_color=%23ef4444" alt="總瀏覽次數" style="height:22px"></div>
   <p class="sub">用免費公開資料，每天預測隔日強勢股、隔天自動檢討錯在哪裡</p>
   <nav>
-    <a href="#calendar">交易日曆</a><a href="#lookup">個股預測查詢</a><a href="#honest">誠實結論</a><a href="#data">資料取得</a><a href="#features">特徵</a><a href="#algo">演算法</a>
+    <a href="#calendar">交易日曆</a><a href="#mktfactors">商品匯率因子</a><a href="#lookup">個股預測查詢</a><a href="#honest">誠實結論</a><a href="#data">資料取得</a><a href="#features">特徵</a><a href="#algo">演算法</a>
     <a href="#extdata">期貨/國際/事件</a><a href="#loop">每日流程</a><a href="#ablation">特徵比較</a><a href="#preopen">盤前更新</a><a href="#predhist">每日預測 vs 實際</a><a href="#tuning">模型調整</a><a href="#results">驗證與曲線</a><a href="#latest">最新預測</a><a href="#review">最新檢討</a>
     <a href="#reports">報告</a>
   </nav>
@@ -197,6 +197,17 @@
   </tbody></table>
   <div id="guruTable"><p class="muted">評估結果產生中…</p></div>
   <p id="guruNote"></p>
+</section>
+
+<section id="mktfactors">
+  <h2>5d. 商品期貨與匯率因子（2026-10 新增）</h2>
+  <p>把<b>貴金屬（黃金、白銀、白金）、銅、能源（WTI、布蘭特、天然氣）、農產（玉米、黃豆、小麥）</b>與<b>匯率（美元/台幣、美元指數、美元/日圓、美元/人民幣、歐元/美元、美元/韓元）</b>的日報酬、5 日變化，以及「產業對各因子的 120 日滾動 beta × 當期因子報酬」（例如原油→塑膠/航運、銅→電器電纜、台幣貶→出口導向）做成特徵。原本已有黃金、原油、美元指數、美元/台幣、美 10 年殖利率、VIX，只擴充不重複。資料來自 Yahoo Finance 日K（商品=美東結算價、匯率=紐約收盤），<b>point-in-time</b>：收盤後模型只用日期早於預測日的資料，盤前模型再加預測日當晚的資料。</p>
+  <div id="mfMoves"><p class="muted">載入中…</p></div>
+  <h3>各產業對各因子的最新滾動 beta（產業超額報酬 ÷ 因子報酬；僅描述性）</h3>
+  <div id="mfBetas" style="overflow-x:auto"></div>
+  <h3>護欄評估（與 <code>twq tune</code> 相同：近 90 日、開→收扣成本、前後半段，另做 2025-07 起長期檢查）</h3>
+  <div id="mfEval"><p class="muted">評估結果產生中…</p></div>
+  <p id="mfNote"></p>
 </section>
 
 <section id="preopen">
