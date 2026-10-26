@@ -6,7 +6,7 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
-from . import db, features as F, model as M
+from . import db, features as F, model as M, weights as W
 from .config import PRED_DIR, PREDICT_REPORT_DIR, MODEL_DIR, TOP_N, DISCLAIMER, REPORT_DIR, PREDICT_SET, PREDICT_LABEL, LIMITUP_MODE
 
 PCT_FEATS = {"r1", "r5", "r10", "r20", "r60", "ma5_ratio", "ma20_ratio", "ma60_ratio", "ma5_ma20", "vol20",
