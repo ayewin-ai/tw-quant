@@ -17,15 +17,16 @@ N_ROUNDS = 300
 COST_ROUNDTRIP = 0.001425 * 2 * 0.6 + 0.003  # 手續費(6折)x2 + 證交稅0.3%
 
 
-def train(X: pd.DataFrame, feats=None, label="y", w=None):
-    """w: tunable weights dict (config/weights.json). None = load the committed config."""
+def train(X: pd.DataFrame, feats=None, label="y", w=None, params_extra=None):
+    """w: tunable weights dict (config/weights.json). None = load the committed config.
+    params_extra: 覆寫 LightGBM 參數（例如回歸目標 objective="regression"，ml4t_eval 的標籤變體用）。"""
     from . import weights as W
     w = w or W.load()
     feats = feats or F.FEATURES
     d = X[X[label].notna()]
     m = dict(w.get("model") or {})
     rounds = int(m.pop("num_rounds", N_ROUNDS))
-    params = {**PARAMS, **m}
+    params = {**PARAMS, **m, **(params_extra or {})}
     sw = None
     hl = w.get("recency_half_life_days")
     if hl:
@@ -42,7 +43,11 @@ def contributions(booster, Xp: pd.DataFrame, feats=None):
     return pd.DataFrame(c[:, :-1], index=Xp.index, columns=feats), c[:, -1]
 
 
-def walk_forward(X, min_train_days=250, step=21, start=None, feats=None, label="y", verbose=True, w=None):
+def walk_forward(X, min_train_days=250, step=21, start=None, feats=None, label="y", verbose=True, w=None,
+                 train_label=None, embargo=0, select=None, params_extra=None):
+    """train_label: 訓練用的標籤欄（預設同 label；標籤變體實驗用，評估一律仍用 label）。
+    embargo: 訓練窗尾端再多丟掉的交易日數（隔離檢查；1 日報酬標籤本來就不重疊，預設 0＝現行行為）。
+    select: callable(train_days)->特徵清單（折內特徵篩選，只能用訓練窗資訊）。"""
     feats = feats or F.FEATURES
     days = sorted(X.index.get_level_values("date").unique())
     lab_days = [d for d in days if X.loc[d].y.notna().any()]
@@ -51,10 +56,12 @@ def walk_forward(X, min_train_days=250, step=21, start=None, feats=None, label="
     for i in range(first, len(lab_days), step):
         train_days = lab_days[:i]          # labels of these days are known before test day i closes
         test_days = lab_days[i:i + step]
-        tr = X.loc[train_days[0]:train_days[-1]]
+        tr_days = train_days[:len(train_days) - embargo] if embargo else train_days
+        tr = X.loc[tr_days[0]:tr_days[-1]]
         te = X.loc[test_days[0]:test_days[-1]]
-        b = train(tr, feats, label, w=w)
-        p = b.predict(te[feats])
+        ft = list(select(tr_days)) if select else feats
+        b = train(tr, ft, train_label or label, w=w, params_extra=params_extra)
+        p = b.predict(te[ft])
         o = te[["next_ret", "next_oc", "next_mkt", "next_excess", "next_xs", "y", "y_oc"]].copy()
         o["y_cc"] = o["y"]
         o["y"] = te[label]

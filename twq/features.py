@@ -59,6 +59,8 @@ from . import features_risk as FR  # noqa: E402
 FEATURE_INFO.update(FR.INFO)
 from . import features_cmdty as CM  # noqa: E402
 FEATURE_INFO.update(CM.INFO)
+from . import features_ta as TA  # noqa: E402
+FEATURE_INFO.update(TA.INFO)
 FEATURE_SETS = {
     "base": BASE_FEATURES,
     "+futures": BASE_FEATURES + FX.FUT,
@@ -82,9 +84,20 @@ FEATURE_SETS = {
     "+cmdty_lite": BASE_FEATURES + CM.CMDTY_LITE,
     "preopen_cmdty": BASE_FEATURES + FX.FUT + FX.GLOBAL + FX.EVENTS + FX.STOCK_EXT + FX.PREOPEN + CM.CMDTY_F + CM.CMDTY_ON,
     "preopen_cmdty_lite": BASE_FEATURES + FX.FUT + FX.GLOBAL + FX.EVENTS + FX.STOCK_EXT + FX.PREOPEN + CM.CMDTY_LITE + CM.CMDTY_LITE_ON,
+    "+ta": BASE_FEATURES + TA.TA_F,
+    "+signal": BASE_FEATURES + TA.SIG_F,
+    "+qr": BASE_FEATURES + TA.QR_F,
+    "all_ml4t": BASE_FEATURES + TA.ALL_F,
     "preopen_flow": BASE_FEATURES + FX.FUT + FX.GLOBAL + FX.EVENTS + FX.STOCK_EXT + FX.PREOPEN +
                     [c for c in FL.ALL_F if c not in ("etf_w", "etf_n")],
 }
+_PRE = FEATURE_SETS["preopen_cmdty"]   # 盤前現行冠軍（含商品/匯率）
+FEATURE_SETS.update({
+    "preopen_ta": _PRE + TA.TA_F,
+    "preopen_signal": _PRE + TA.SIG_F,
+    "preopen_qr": _PRE + TA.QR_F,
+    "preopen_ml4t": _PRE + TA.ALL_F,
+})
 FEATURES = BASE_FEATURES  # default (overridden by config of the trained model)
 
 
@@ -302,7 +315,19 @@ def build(start=None, end=None, with_labels=True, min_hist=None, next_day=None):
         f.update(FR.risk_feats(adj, r, mkt_r1, ind))
     except Exception as e:
         print("risk features unavailable:", e)
-    for c in GU.ALL_F + FR.RISK_F:
+    try:  # 第三批：技術指標庫 / 訊號處理 / 統計套利 (twq/features_ta.py)
+        av20_ = val.fillna(0).rolling(20).mean()
+        f.update(TA.ta_feats(adj, close, opn, high, low, vol, val, r, traded))
+        f.update(TA.sig_feats(adj, r, traded))
+        f.update(TA.qr_feats(adj, r, traded, f["beta60"], ind, av20_, mkt_r1))
+        _reg = TA.mkt_regime(mkt_r1, tclose)
+        for _c in _reg.columns:
+            mkt[_c] = _reg[_c]
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print("ta features unavailable:", e)
+    for c in GU.ALL_F + FR.RISK_F + [c for c in TA.ALL_F if not c.startswith("qr_mkt")]:
         if c not in f:
             f[c] = pd.DataFrame(np.nan, index=days, columns=close.columns)
 
