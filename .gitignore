@@ -16,3 +16,4 @@ reports/backtest_daily.csv
 !reports/archive/predictions/*.csv.gz
 data/raw_fin/
 !models/grey_backtest.json
+!models/ml4t_eval.json

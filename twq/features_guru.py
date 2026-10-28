@@ -6,6 +6,7 @@
        資產成長 (FF5 CMA)、EPS 年增 (PEAD/SUE 代理)、Greenblatt 神奇公式、Piotroski F 分數（6 項可得版）、
        Lynch PEG、Graham 數、現金殖利率 (Buffett/價值)、CANSLIM 條件數 (O'Neil)。
 """
+import os
 import numpy as np
 import pandas as pd
 
@@ -37,6 +38,8 @@ def price_feats(adj, r, mk, ind):
     f["mom6_1"] = adj.shift(21) / adj.shift(125) - 1
     f["high52"] = adj / adj.rolling(250, min_periods=120).max() - 1
     r120 = adj / adj.shift(120) - 1
+    if os.environ.get("TWQ_SECFIX") == "1":
+        r120 = r120.where((r != 0).cummax())
     f["ind_mom"] = r120.T.groupby(ind).transform("mean").T
     m = mk.reindex(r.index)
     cov = (r.mul(m, axis=0).rolling(60, min_periods=30).mean()

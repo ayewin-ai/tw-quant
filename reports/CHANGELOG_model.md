@@ -3,6 +3,16 @@
 自動調權（`twq tune`）與程式修正（commit 訊息前綴 `auto-fix:`）都記在這裡，最新在最上面。本紀錄僅供研究，不構成投資建議。
 
 <!-- entries -->
+## 2026-10-28（v1）第三批參考：ML4T / QuantResearch / 訊號處理 / 指標庫 / VisualHFT（人工評估，非 tune）
+
+- 來源（只借概念、程式自行重寫）：stefan-jansen/machine-learning-for-trading（MIT）、letianzj/QuantResearch（MIT）、SparkAbhi/SignalProcessingWithPython（無授權）、hjeffreywang/Stock_feature_engineering（無授權，連結損毀、依名稱推定）、VisualHFT（Apache-2.0，需逐筆/五檔資料→不適用）、jpmorganchase/python-training（Apache-2.0，只借測試實務）。LinkedIn 第 1 條短網址實際指向 clfrenchgit/gdax-bot（無授權、加密貨幣），已記錄、不採用。
+- 新增特徵組（`twq/features_ta.py`，全部因果、不啟用）：ta_*（25，ATR/Parkinson/Garman-Klass/Aroon/CMF/OBV/Amihud…）、sg_*（10，Hurst、頻譜、排列熵、Kalman）、qr_*（12，配對殘差、市場狀態）。`model.walk_forward` 新增 train_label / embargo / select / params_extra（預設行為不變）。
+- 護欄評估（近 90 日 + 2025-07 起長窗；同 tune 門檻）：特徵組 6 個、標籤變體 4 個、特徵篩選 2 個、embargo5、secfix，**全數不啟用**，現行冠軍（收盤後 base/y；盤前 preopen_cmdty/y_oc）不變。收盤後冠軍近 90 日開→收淨 -59.6 bp/日、超額 +181.7 bp、AUC(開→收) 0.5217；盤前冠軍 -31.4 / +14.8 / 0.5573。
+- 稽核：①洗牌標籤 AUC(開→收) 0.5009（收盤後）/ 0.5046（盤前）≈ 隨機，評估程式無洩漏；②embargo5 沒有變好，標籤是隔日報酬無重疊，不需要 purge；③截斷不變性測試發現小洩漏：`sec_r5/rel_sec_r5/ind_mom`（及依賴者 cmb_*、qr_resid_*、sec_beta60）的產業平均把尚未上市股票的 0 報酬平均進去。修正版 `TWQ_SECFIX=1`：盤前 +4.8 bp/日、前/後半 +3.3/+6.3、長窗 Rank IC -0.0002（未過嚴格門檻）；收盤後 -7.9 bp/日 → 預設關閉、保留可選；④校準：Brier 0.2481（常數 0.2500）、ECE 1.5%、logit 斜率 0.70（略過度自信），等滲迴歸無實質改善 → 只報告；「上漲機率」實為「跑贏當日中位數機率」。
+- 元標記（Top-30 → 第二層 → Top-10）：盤前「主排名＋第二層」長窗 +4.4 bp/日、近 90 日 +5.8 bp/日、前後半皆正，但配對 t≈1.8、且已試約 25 個變體 → 僅報告，等樣本更多再測。
+- 新增 `tests/test_causality.py`（特徵因果性單元測試）、`python -m twq.ml4t_extra trunc`（整條管線截斷不變性稽核）、網站 5f 區塊（docs/data/ml4t.json）。requirements 補 scipy。
+- 沒有改動 config/weights.json，run_daily.sh / run_preopen.sh 流程不變。
+
 ## 2026-10-27（v1）
 
 - 檢視近 6 次檢討（樣本仍少，只用來挑候選；是否採用一律看近 90 日 walk-forward）：誤判原因 大盤系統性×14、國際股市×14、新聞/事件×13、產業輪動×10、追高反轉×8、美股隔夜×7；收盤後名單近期 跳空 +232 bp / 盤中 -201 bp

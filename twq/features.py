@@ -1,4 +1,5 @@
 """Feature engineering. All features for date t use only information available after t's close."""
+import os
 import datetime as dt
 
 import numpy as np
@@ -263,7 +264,10 @@ def build(start=None, end=None, with_labels=True, min_hist=None, next_day=None):
     # sector
     ind = info.set_index("code")["industry"].reindex(close.columns).fillna("未知")
     sec_r1 = f["r1"].T.groupby(ind).transform("mean").T
-    sec_r5 = f["r5"].T.groupby(ind).transform("mean").T
+    # 產業 5 日平均：預設與舊版相同；TWQ_SECFIX=1 時只平均「已上市(已有過非零報酬)」的股票，
+    # 避免尚未上市股票的 0 報酬稀釋產業平均（截斷不變性稽核發現的輕微未來資訊，見 ml4t_extra.audit_truncation）。
+    _r5 = f["r5"].where((r != 0).cummax()) if os.environ.get("TWQ_SECFIX") == "1" else f["r5"]
+    sec_r5 = _r5.T.groupby(ind).transform("mean").T
     f["sec_r1"] = sec_r1
     f["sec_r5"] = sec_r5
     f["rel_sec_r5"] = f["r5"] - sec_r5

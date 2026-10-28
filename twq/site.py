@@ -250,5 +250,12 @@ def build():
         _dump("risk.json", _risk.payload())
     except Exception as e:
         print("risk.json failed:", e)
+    try:
+        from . import ml4t_site
+        pl = ml4t_site.payload()
+        if pl:
+            _dump("ml4t.json", pl)
+    except Exception as e:
+        print("ml4t.json failed:", e)
     _dump("meta.json", meta)
     print(f"site data written to {OUT}")

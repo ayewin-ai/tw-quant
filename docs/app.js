@@ -482,3 +482,52 @@ function renderTuning(t) {
     t.picks.map(p => `<tr><td>${p.code}</td><td>${p.name}</td><td>${p.industry || ''}</td><td>${pp(t.stock_vol_ann[p.code])}</td><td>${f(t.stock_beta[p.code])}</td><td>${pp(t.schemes.equal.risk_contrib[p.code])}</td><td>${pp(t.schemes.risk_parity.weights[p.code])}</td></tr>`).join('') + '</tbody></table>'; }).join('');
   document.getElementById('rkNote').innerHTML = `<b>結論：</b>${r.decision || '評估中'} ⚠️ 僅供研究，不構成投資建議。`;
 })();
+
+// ===== 第三批參考（ML4T / QuantResearch / 訊號處理 / 指標庫）=====
+(async () => {
+  const p = await J('ml4t.json');
+  const el = document.getElementById('mlFeat');
+  if (!p || !el) return;
+  const f = (x, d = 2) => x == null ? 'NA' : (+x).toFixed(d);
+  const mn = m => m === 'close' ? '收盤後' : '盤前';
+  const tbl = rows => `<table><thead><tr><th>模型</th><th>變體</th><th>特徵數</th><th>結果</th><th>開→收淨 bp/日</th><th>超額 bp</th><th>AUC(開→收)</th><th>前/後半 bp</th><th>長窗 AUC / RankIC / Top-10 bp</th><th>說明</th></tr></thead><tbody>` +
+    rows.map(x => `<tr><td>${mn(x.model)}</td><td>${x.label}</td><td>${x.n_features}</td><td>${x.enable ? '✅ 啟用' : '❌ 不啟用（僅報告）'}</td><td>${f(x.net_oc_bp, 1)}</td><td>${f(x.excess_bp, 1)}</td><td>${f(x.auc_oc, 4)}</td><td>${f(x.h1, 1)} / ${f(x.h2, 1)}</td><td>${f(x.long_auc, 4)} / ${f(x.long_ic, 4)} / ${f(x.long_top_bp, 1)}</td><td>${x.short_msg || ''}<br><span class="muted">${x.long_msg || ''}</span></td></tr>`).join('') + '</tbody></table>';
+  const ch = Object.values(p.champions).filter(Boolean).map(c => `<tr><td>${mn(c.model)}</td><td>現行冠軍</td><td>${c.n_features}</td><td>${f(c.net_oc_bp, 1)}</td><td>${f(c.excess_bp, 1)}</td><td>${f(c.auc_oc, 4)}</td><td>${f(c.h1, 1)} / ${f(c.h2, 1)}</td><td>${f(c.long_auc, 4)} / ${f(c.long_ic, 4)} / ${f(c.long_top_bp, 1)}</td></tr>`).join('');
+  el.innerHTML = `<table><thead><tr><th>模型</th><th></th><th>特徵數</th><th>開→收淨 bp/日</th><th>超額 bp</th><th>AUC(開→收)</th><th>前/後半 bp</th><th>長窗 AUC / RankIC / Top-10 bp</th></tr></thead><tbody>${ch}</tbody></table>` + tbl(p.groups.feat || []) +
+    `<p class="muted">「開→收淨」＝Top-10 隔日開盤買、收盤賣、扣來回成本（0.1425%×2×0.6 折讓＋0.3% 證交稅）。收盤後模型的優勢在「收盤→隔收」超額，不在開→收，所以開→收淨本來就是負的；比較看相對冠軍的變化。</p>`;
+  document.getElementById('mlLabel').innerHTML = tbl([...(p.groups.label || []), ...(p.groups.select || [])]);
+  // 稽核
+  let h = '';
+  const t = p.truncation;
+  if (t) {
+    h += `<h4>特徵截斷不變性（look-ahead 稽核；受 python-training 的測試實務啟發）</h4><p>把價量/法人/融資/指數表截到 ${t.cut_date} 重建特徵，與完整資料建出來的 ${t.check_dates[0]}~${t.check_dates[1]} 比對（${t.n_rows} 列 × ${t.n_features} 個數值特徵）：<b>${t.n_features_mismatch} 個特徵不一致</b>。</p>` +
+      `<ul><li><b>真正的小洩漏（已找到、已寫成可開關的修正）</b>：<code>sec_r5 / rel_sec_r5 / ind_mom</code> 與依賴產業平均的 <code>cmb_*、qr_resid_*、sec_beta60</code>——產業平均把「尚未上市股票」的 0 報酬也平均進去，未來才上市的股票會稀釋過去的產業平均（約 3% 量級的輕微偏移）。修正版 <code>TWQ_SECFIX=1</code> 只平均已上市股票，見下表 secfix：盤前模型短窗通過、長窗 Rank IC −0.0002（未過我們自訂的嚴格門檻）、收盤後模型變差，所以<b>預設不啟用</b>、保留為可選。</li>` +
+      `<li>其餘為<b>設計上就會用到「下一個開盤前已知」資訊</b>的特徵（<code>gap_expect、night_x_beta、tx_night_*</code>＝台指夜盤；<code>rebal_mkt_days</code>＝已公告的行事曆倒數），不算洩漏。</li>` +
+      `<li>⚠️ 限制：只截斷價量/法人/融資/指數表；美股、營收、外部商品/匯率表沒有截斷。</li></ul>`;
+  }
+  const ax = (p.groups.audit || []);
+  if (ax.length) h += `<h4>embargo / 洗牌標籤 / 修正對照</h4>` + tbl(ax) + `<p class="muted">標籤是「隔日」報酬，沒有重疊標籤，所以不需要 purge；embargo5 是實證檢查：隔離最後 5 日後績效沒有變好（AUC 還略降），代表沒有靠相鄰日洩漏。洗牌標籤的 AUC(開→收)≈0.50、超額≈0，表示評估程式沒有偷看答案。</p>`;
+  const c = p.calibration;
+  if (c) {
+    h += `<h4>機率校準（Brier / ECE / 等滲迴歸）</h4><table><thead><tr><th>模型</th><th>Brier</th><th>常數基準</th><th>ECE</th><th>logit 斜率</th><th>後半 Brier 原始 → 等滲</th></tr></thead><tbody>` +
+      Object.keys(c).map(k => `<tr><td>${mn(k)}</td><td>${f(c[k].brier, 5)}</td><td>${f(c[k].brier_const, 5)}</td><td>${f(c[k].ece, 4)}</td><td>${f(c[k].logit_slope, 2)}</td><td>${f(c[k].brier_h2_raw, 5)} → ${f(c[k].brier_h2_iso, 5)}</td></tr>`).join('') + '</tbody></table>' +
+      `<p class="muted">斜率 &lt; 1＝模型機率略為<b>過度自信</b>（高機率檔的實際勝率較低），但 ECE 僅約 1.2~1.5%，等滲迴歸只讓 Brier 好 0.00004 以內，沒有實質好處；校準只改變顯示的機率、不改變 Top-N 排名，所以<b>只報告、不啟用</b>。另外要注意：報告中的「上漲機率」其實是「<b>跑贏當日全市場中位數的機率</b>」，不是「股價上漲機率」。</p>`;
+  }
+  const dc = p.ic_decay_close;
+  if (dc) h += `<h4>預測力衰減（收盤後模型；Spearman IC）</h4><p>` + ['c2c_1d', 'c2c_2d', 'c2c_3d', 'c2c_4d', 'c2c_5d'].map(k => `${k.replace('c2c_', '')} 日 ${f(dc[k].ic, 3)}`).join(' → ') + `；隔夜跳空 IC ${f(dc.gap_next.ic, 3)}、隔日日內 IC ${f(dc.intraday_next.ic, 3)}。<span class="muted">訊號隨持有天數緩慢衰減（5 日仍有 ${f(dc.c2c_5d.ic, 3)}），且大部分來自隔夜跳空；這與「收盤→隔收有超額、開→收扣成本後為負」一致。</span></p>`;
+  document.getElementById('mlAudit').innerHTML = h;
+  // meta + IC
+  let m = '';
+  const me = p.meta || {};
+  if (Object.keys(me).length) {
+    m += `<h4>元標記（meta-labeling）：主模型 Top-30 → 第二層模型 → Top-10（約 ${(me.close || me.preopen).days} 日 walk-forward）</h4><table><thead><tr><th>模型</th><th>方式</th><th>開→收淨 bp/日</th><th>前/後半 bp</th><th>相對主模型</th><th>配對 t</th><th>近 90 日 Δ / 前後半</th><th>結果</th></tr></thead><tbody>` +
+      Object.keys(me).map(k => ['prim', 'meta', 'comb'].map(v => { const x = me[k][v]; const nm = {prim: '主模型 Top-10', meta: '只用第二層', comb: '主排名＋第二層排名'}[v];
+        return `<tr><td>${mn(k)}</td><td>${nm}</td><td>${f(x.net_oc_bp, 1)}</td><td>${f(x.h1, 1)} / ${f(x.h2, 1)}</td><td>${v === 'prim' ? '—' : me[k][v + '_msg']}</td><td>${v === 'prim' ? '' : f(me[k][v + '_t'], 2)}</td><td>${v === 'prim' ? '' : f(me[k][v + '_90'].dnet_bp, 1) + ' / ' + f(me[k][v + '_90'].dh1, 1) + ', ' + f(me[k][v + '_90'].dh2, 1)}</td><td>${v === 'prim' ? '' : (me[k][v + '_enable'] && me[k][v + '_enable_90']) ? '⚠️ 護欄過、但 t&lt;2 → 僅報告' : '❌ 不啟用'}</td></tr>`; }).join('')).join('') + '</tbody></table>' +
+      `<p class="muted">盤前模型的「主排名＋第二層排名」在長窗與近 90 日都通過護欄（+4.4 / +5.8 bp/日），但配對 t 值只有約 1.8，且我們這輪已嘗試約 25 個變體（多重比較），因此<b>不上線</b>；上線還需要保存每日樣本外預測來訓練第二層，等資料更多再重測。</p>`;
+  }
+  const ic = p.ic_top;
+  if (ic) m += `<h4>新特徵的單因子 IC（逐日 Spearman IC，|t| 最大者）</h4>` + Object.keys(ic).map(k => `<p><b>${ic[k].name}</b>：` + ic[k].rows.map(r => `${r.feature} IC ${f(r.ic, 3)}（t ${f(r.t, 1)}）`).join('；') + '</p>').join('') + `<p class="muted">單因子 IC 顯著不等於加進模型有增益：這些特徵與現有特徵（波動、日內振幅、ATR 等）高度共線，進模型後沒有額外貢獻。</p>`;
+  document.getElementById('mlMeta').innerHTML = m;
+  const en = p.enabled || [];
+  document.getElementById('mlNote').innerHTML = `<b>結論：</b>${en.length ? '通過兩個窗口、已啟用：' + en.join('、') : '本輪沒有任何新特徵組、標籤變體或篩選法同時通過近 90 日與長窗護欄，因此<b>全部維持報告用途、不改現行模型</b>'}。資料僅約 524 個交易日、短窗與長窗結論常相反，這輪結果應視為「沒有證據顯示有增益」，而不是「證明無效」。⚠️ 僅供研究，不構成投資建議。`;
+})();

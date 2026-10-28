@@ -14,7 +14,7 @@
   <div class="views" style="margin:4px 0 8px"><img src="https://visitor-badge.laobi.icu/badge?page_id=ayewin-ai.tw-quant&left_text=%E7%B8%BD%E7%80%8F%E8%A6%BD%E6%AC%A1%E6%95%B8&left_color=%23334155&right_color=%23ef4444" alt="總瀏覽次數" style="height:22px"></div>
   <p class="sub">用免費公開資料，每天預測隔日強勢股、隔天自動檢討錯在哪裡</p>
   <nav>
-    <a href="#calendar">交易日曆</a><a href="#mktfactors">商品匯率因子</a><a href="#risk">風險與分散化</a><a href="#lookup">個股預測查詢</a><a href="#honest">誠實結論</a><a href="#data">資料取得</a><a href="#features">特徵</a><a href="#algo">演算法</a>
+    <a href="#calendar">交易日曆</a><a href="#mktfactors">商品匯率因子</a><a href="#risk">風險與分散化</a><a href="#ml4t">第三批參考</a><a href="#lookup">個股預測查詢</a><a href="#honest">誠實結論</a><a href="#data">資料取得</a><a href="#features">特徵</a><a href="#algo">演算法</a>
     <a href="#extdata">期貨/國際/事件</a><a href="#loop">每日流程</a><a href="#ablation">特徵比較</a><a href="#preopen">盤前更新</a><a href="#predhist">每日預測 vs 實際</a><a href="#tuning">模型調整</a><a href="#results">驗證與曲線</a><a href="#latest">最新預測</a><a href="#review">最新檢討</a>
     <a href="#reports">報告</a>
   </nav>
@@ -225,6 +225,24 @@
   <h3>④ 今日 Top-N 投組風險報告</h3>
   <div id="rkToday"></div>
   <p id="rkNote"></p>
+</section>
+<section id="ml4t">
+  <h2>5f. 第三批參考（2026-10 新增）：ML4T / QuantResearch / 訊號處理 / 技術指標庫 / VisualHFT</h2>
+  <p><b>參考來源與致謝（皆只借用<i>概念</i>，程式由本專案自行重寫，未複製、未 vendor 任何程式碼；實作在 <code>twq/features_ta.py</code>、<code>twq/ml4t_eval.py</code>、<code>twq/ml4t_extra.py</code>）：</b></p>
+  <ul>
+    <li><a href="https://github.com/stefan-jansen/machine-learning-for-trading">stefan-jansen/machine-learning-for-trading</a>（MIT）：三重障礙標籤、元標記（meta-labeling）、purged/embargo 交叉驗證、alpha 因子庫、IC 分析、含成本回測。</li>
+    <li><a href="https://github.com/letianzj/QuantResearch">letianzj/QuantResearch</a>（MIT）：統計套利/配對、因子模型、選擇權/波動度；這裡只做可離線用日資料的部分（配對殘差、市場狀態）。</li>
+    <li><a href="https://github.com/SparkAbhi/SignalProcessingWithPython">SparkAbhi/SignalProcessingWithPython</a>（未標示授權，僅取概念）：傅立葉、濾波、去噪；這裡改成因果版（Hurst、頻譜、排列熵、Kalman）。環境沒有 PyWavelets，故<b>未做小波</b>。</li>
+    <li><a href="https://github.com/hjeffreywang/Stock_feature_engineering">hjeffreywang/Stock_feature_engineering</a>（未標示授權，僅取概念）：指標庫（ATR、Parkinson/Garman-Klass 波動、Aroon、CMF/OBV、Amihud…）。⚠️ 原連結網址損毀，我依名稱推定是此 repo。</li>
+    <li><a href="https://github.com/VisualHFT/VisualHFT">VisualHFT</a>（Apache-2.0）：即時 L2 委託簿/微結構視覺化。⚠️ 需要逐筆/五檔資料，台股免費歷史資料無法回補，<b>不適用</b>；只借「資金流/流動性」概念做日資料代理（CMF、OBV、Amihud、隔夜 vs 日內拆分）。LinkedIn 短網址實際指向 <a href="https://github.com/clfrenchgit/gdax-bot">clfrenchgit/gdax-bot</a>（無授權、加密貨幣、Mathematica），與貼文名稱不符，故只記錄、不採用。</li>
+    <li><a href="https://github.com/jpmorganchase/python-training">jpmorganchase/python-training</a>（Apache-2.0）：Python 訓練教材，沒有量化演算法；只借工程實務（可重現的稽核與測試），見下方「截斷不變性稽核」。</li>
+  </ul>
+  <p class="muted">資料只有約 524 個交易日（2024-08 起），小樣本、多重比較風險高：所以啟用門檻＝<b>近 90 日護欄（開→收淨 ≥ +3 bp/日、超額不惡化、AUC 不惡化、前後半段都贏）且 2025-07 起長窗（AUC、Rank IC、Top-10 開→收都不比冠軍差）</b>。兩者都過才算可啟用，否則只報告、不上線。</p>
+  <h3>① 新特徵組（技術指標庫 / 訊號處理 / QuantResearch）</h3><div id="mlFeat"><p class="muted">評估結果產生中…</p></div>
+  <h3>② 標籤變體與特徵篩選（ML4T）</h3><div id="mlLabel"></div>
+  <h3>③ 稽核：洩漏、驗證、校準（含發現的小問題）</h3><div id="mlAudit"></div>
+  <h3>④ 元標記（meta-labeling）與 IC 分析</h3><div id="mlMeta"></div>
+  <p id="mlNote"></p>
 </section>
 <section id="preopen">
   <h2>6b. 最新盤前更新預測</h2>
