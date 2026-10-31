@@ -14,7 +14,7 @@
   <div class="views" style="margin:4px 0 8px"><img src="https://visitor-badge.laobi.icu/badge?page_id=ayewin-ai.tw-quant&left_text=%E7%B8%BD%E7%80%8F%E8%A6%BD%E6%AC%A1%E6%95%B8&left_color=%23334155&right_color=%23ef4444" alt="總瀏覽次數" style="height:22px"></div>
   <p class="sub">用免費公開資料，每天預測隔日強勢股、隔天自動檢討錯在哪裡</p>
   <nav>
-    <a href="#calendar">交易日曆</a><a href="#mktfactors">商品匯率因子</a><a href="#risk">風險與分散化</a><a href="#ml4t">第三批參考</a><a href="#lookup">個股預測查詢</a><a href="#honest">誠實結論</a><a href="#data">資料取得</a><a href="#features">特徵</a><a href="#algo">演算法</a>
+    <a href="#calendar">交易日曆</a><a href="#mktfactors">商品匯率因子</a><a href="#risk">風險與分散化</a><a href="#ml4t">第三批參考</a><a href="#k151">151 策略</a><a href="#lookup">個股預測查詢</a><a href="#honest">誠實結論</a><a href="#data">資料取得</a><a href="#features">特徵</a><a href="#algo">演算法</a>
     <a href="#extdata">期貨/國際/事件</a><a href="#loop">每日流程</a><a href="#ablation">特徵比較</a><a href="#preopen">盤前更新</a><a href="#predhist">每日預測 vs 實際</a><a href="#tuning">模型調整</a><a href="#results">驗證與曲線</a><a href="#latest">最新預測</a><a href="#review">最新檢討</a>
     <a href="#reports">報告</a>
   </nav>
@@ -243,6 +243,20 @@
   <h3>③ 稽核：洩漏、驗證、校準（含發現的小問題）</h3><div id="mlAudit"></div>
   <h3>④ 元標記（meta-labeling）與 IC 分析</h3><div id="mlMeta"></div>
   <p id="mlNote"></p>
+</section>
+<section id="k151">
+  <h2>5g. 151 Trading Strategies（2026-10-31 新增）</h2>
+  <p><b>出處與致謝：</b>Zura Kakushadze &amp; Juan Andrés Serur,《151 Trading Strategies》, Palgrave Macmillan (2018)；英文版 <a href="https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3247865">SSRN 3247865</a>，西文版 <a href="https://arxiv.org/abs/1912.04492">arXiv:1912.04492</a>。依論文公式自行改寫為無未來資訊的日資料特徵（<code>twq/features_151.py</code>，因果測試在 <code>tests/test_causality.py</code>），未複製任何程式碼。</p>
+  <ul>
+    <li><b>動能</b>：3.1 價格動能（12-1 月累積、風險調整）、3.7 殘差動能（扣 beta 的殘差報酬）</li>
+    <li><b>均值回歸</b>：3.9/3.10 產業去均值 1 日、5 日報酬（含波動標準化）</li>
+    <li><b>均線</b>：3.11 價/均線、3.12 雙均線、3.13 三均線排列</li>
+    <li><b>支撐壓力/通道</b>：3.14 pivot（C=(H+L+C)/3、R=2C−L、S=2C−H）、3.15 20 日通道</li>
+    <li><b>輪動/低波/多因子</b>：4.1 產業動能輪動、3.4 低波動、3.6 多因子排名平均</li>
+    <li class="muted">未做：3.2/3.3 盈餘動能與價值（已在學術/大師因子）、3.5 隱含波動與 3.19 造市（無選擇權/逐筆資料）、3.8 配對（以產業群組版取代）、3.16 併購事件（無資料）、3.17 KNN 與 3.20 Alpha combo（LightGBM 本身就是組合器）。</li>
+  </ul>
+  <div id="k151Tbl"><p class="muted">評估結果產生中…</p></div>
+  <p><b>結論：</b>收盤後與盤前模型的 12 組挑戰者都<b>沒有通過護欄</b>，全部維持停用、只報告。⚠️ 僅供研究，不構成投資建議。</p>
 </section>
 <section id="preopen">
   <h2>6b. 最新盤前更新預測</h2>

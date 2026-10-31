@@ -61,6 +61,8 @@ FEATURE_INFO.update(FR.INFO)
 from . import features_cmdty as CM  # noqa: E402
 FEATURE_INFO.update(CM.INFO)
 from . import features_ta as TA  # noqa: E402
+from . import features_151 as K151  # noqa: E402
+FEATURE_INFO.update(K151.INFO)
 FEATURE_INFO.update(TA.INFO)
 FEATURE_SETS = {
     "base": BASE_FEATURES,
@@ -99,6 +101,10 @@ FEATURE_SETS.update({
     "preopen_qr": _PRE + TA.QR_F,
     "preopen_ml4t": _PRE + TA.ALL_F,
 })
+for _g, _c in list(K151.GROUPS.items()) + [("all", K151.ALL_F)]:
+    FEATURE_SETS[f"+k151_{_g}"] = BASE_FEATURES + _c
+    FEATURE_SETS[f"preopen_k151_{_g}"] = _PRE + _c
+
 FEATURES = BASE_FEATURES  # default (overridden by config of the trained model)
 
 
@@ -319,6 +325,10 @@ def build(start=None, end=None, with_labels=True, min_hist=None, next_day=None):
         f.update(FR.risk_feats(adj, r, mkt_r1, ind))
     except Exception as e:
         print("risk features unavailable:", e)
+    try:  # 151 Trading Strategies (twq/features_151.py)
+        f.update(K151.feats_151(adj, close, high, low, r, mkt_r1, ind))
+    except Exception as e:
+        print("151 features unavailable:", e)
     try:  # 第三批：技術指標庫 / 訊號處理 / 統計套利 (twq/features_ta.py)
         av20_ = val.fillna(0).rolling(20).mean()
         f.update(TA.ta_feats(adj, close, opn, high, low, vol, val, r, traded))

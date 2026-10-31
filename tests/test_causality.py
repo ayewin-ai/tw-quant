@@ -56,3 +56,20 @@ if __name__ == "__main__":
     test_ta_causal()
     test_sig_causal()
     print("ok: ta/sig features are causal")
+
+
+def test_151_causal():
+    from twq import features_151 as K
+    d = _panel()
+    ind = pd.Series(["a", "b", "c"] * 4, index=d["r"].columns)
+    mkt = d["r"].mean(axis=1)
+    args = lambda t: (d["adj"].iloc[:t], d["close"].iloc[:t], d["high"].iloc[:t], d["low"].iloc[:t],  # noqa: E731
+                      d["r"].iloc[:t], mkt.iloc[:t], ind)
+    full, part = K.feats_151(*args(400)), K.feats_151(*args(330))
+    for k in part:
+        _same(full[k], part[k], k)
+    print("ok: 151 features are causal")
+
+
+if __name__ == "__main__":
+    test_151_causal()

@@ -257,5 +257,11 @@ def build():
             _dump("ml4t.json", pl)
     except Exception as e:
         print("ml4t.json failed:", e)
+    try:  # 151 Trading Strategies 評估結果
+        _k = MODEL_DIR / "k151_eval.json"
+        if _k.exists():
+            _dump("k151.json", json.loads(_k.read_text()))
+    except Exception as e:
+        print("k151.json failed:", e)
     _dump("meta.json", meta)
     print(f"site data written to {OUT}")

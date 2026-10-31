@@ -531,3 +531,14 @@ function renderTuning(t) {
   const en = p.enabled || [];
   document.getElementById('mlNote').innerHTML = `<b>結論：</b>${en.length ? '通過兩個窗口、已啟用：' + en.join('、') : '本輪沒有任何新特徵組、標籤變體或篩選法同時通過近 90 日與長窗護欄，因此<b>全部維持報告用途、不改現行模型</b>'}。資料僅約 524 個交易日、短窗與長窗結論常相反，這輪結果應視為「沒有證據顯示有增益」，而不是「證明無效」。⚠️ 僅供研究，不構成投資建議。`;
 })();
+
+// ===== 151 Trading Strategies =====
+(async () => {
+  const d = await J('k151.json'); const el = document.getElementById('k151Tbl');
+  if (!d || !el) return;
+  const f = (x, n = 1) => x == null ? 'NA' : (+x).toFixed(n);
+  const rows = Object.keys(d).filter(k => k.includes('|tune|') || k.includes('|champion|')).map(k => {
+    const [m, t, s] = k.split('|'); const x = d[k]; const L = d[`${m}|long|${s}`] || {};
+    return `<tr><td>${m === 'close' ? '收盤後' : '盤前'}</td><td>${t === 'champion' ? '現行冠軍 ' : ''}${s}</td><td>${t === 'champion' ? '—' : (x.ok ? '✅ 啟用' : '❌ 僅報告')}</td><td>${f(x.net_oc_bp)}</td><td>${f(x.net_h1_bp)} / ${f(x.net_h2_bp)}</td><td>${f(x.excess_bp)}</td><td>${f(L.auc, 4)} / ${f(L.rank_ic, 4)} / ${f(L.top_avg_oc_bp)}</td></tr>`; }).join('');
+  el.innerHTML = `<table><thead><tr><th>模型</th><th>特徵組</th><th>結果</th><th>近90日 開→收淨 bp/日</th><th>前/後半 bp</th><th>Top-10 超額 bp</th><th>2025-07 起長窗 AUC / RankIC / Top-10 開→收 bp</th></tr></thead><tbody>${rows}</tbody></table>`;
+})();
