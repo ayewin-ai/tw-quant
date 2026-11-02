@@ -324,8 +324,10 @@ def mops_revenue(year, month):
                 continue
             html = r.content.decode("big5", errors="ignore")
             try:
-                tabs = pd.read_html(io.StringIO(html))
-            except ValueError:
+                # 明確指定 lxml：未公布/格式異常的頁面否則會退到 bs4/html5lib（未安裝）而整段崩潰
+                tabs = pd.read_html(io.StringIO(html), flavor="lxml")
+            except (ValueError, ImportError) as e:
+                print(f"mops_revenue {mk}{suffix} {year}-{month:02d}: skip ({type(e).__name__})", flush=True)
                 continue
             for t in tabs:
                 if t.shape[1] < 7:
@@ -502,7 +504,11 @@ def update_extras(start: dt.date, end: dt.date, verbose=True, revenue_months=Non
         ym = m.strftime("%Y-%m")
         if ym in have_rev and ym < (end - dt.timedelta(days=70)).strftime("%Y-%m"):
             continue
-        n = mops_revenue(m.year, m.month)
+        try:
+            n = mops_revenue(m.year, m.month)
+        except Exception as e:  # 單月營收失敗不可中斷後續 extras / fetch_ext / flows
+            print(f"revenue {ym}: failed ({type(e).__name__}: {e})", flush=True)
+            continue
         if verbose:
             print(f"revenue {ym}: {n}", flush=True)
     openapi_revenue_latest()

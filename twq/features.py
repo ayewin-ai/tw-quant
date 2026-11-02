@@ -262,9 +262,17 @@ def build(start=None, end=None, with_labels=True, min_hist=None, next_day=None):
     # US: last US session that closed before Taiwan close of day t (US date < t)
     usw = us.pivot(index="date", columns="symbol", values="ret").sort_index()
     usc = us.pivot(index="date", columns="symbol", values="close").sort_index()
+    # 每個代號各自取「最後一個有值的美股交易日」：us_daily 也存了商品期貨/外匯，週日也有列；
+    # 舊寫法對整張寬表取最後一列，週一（及美股休市後）會取到週日那列而得到 NA。TWQ_US_ASOF_OLD=1 可還原舊行為（僅供 A/B）。
+    _old = os.environ.get("TWQ_US_ASOF_OLD") == "1"
+    def _asof(tab, col):
+        if col not in tab:
+            return [np.nan] * len(days)
+        s = tab[col] if _old else tab[col].dropna()
+        return [s[s.index < d].iloc[-1] if (s.index < d).any() else np.nan for d in days]
     for col, name in (("sox", "us_sox"), ("tsm_adr", "us_tsm"), ("nasdaq", "us_ndx")):
-        mkt[name] = [usw[col][usw.index < d].iloc[-1] if col in usw and (usw.index < d).any() else np.nan for d in days]
-    mkt["us_vix"] = [usc["vix"][usc.index < d].iloc[-1] if "vix" in usc and (usc.index < d).any() else np.nan for d in days]
+        mkt[name] = _asof(usw, col)
+    mkt["us_vix"] = _asof(usc, "vix")
     mkt["dow"] = [dt.date.fromisoformat(d).weekday() for d in days]
 
     # sector
