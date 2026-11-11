@@ -19,6 +19,11 @@ $PY -m twq.calendar status "$TWDATE" || true
 $PY -m twq.calendar retarget || true   # 目標日其實休市的舊預測改指向真正的下一交易日
 echo "--- [1/5] 更新資料"
 $PY -m twq update --end "$TWDATE" --days 10 || echo "更新發生錯誤（繼續執行，可能使用舊資料）"
+# 任一市場收盤價抓取失敗（如櫃買逾時）時重試一次，避免用不完整資料檢討/預測
+if ! $PY -c "import sys; from twq import db; sys.exit(1 if 'error' in (db.fetched('twse_prices').get('$TWDATE'), db.fetched('tpex_prices').get('$TWDATE')) else 0)"; then
+  echo "收盤價抓取有錯誤，60 秒後重試一次"; sleep 60
+  $PY -m twq update --end "$TWDATE" --days 3 || echo "重試仍發生錯誤（繼續執行，可能使用不完整資料）"
+fi
 
 echo "--- [1b/5] 季財報（MOPS 彙總報表）＋券商目標價新聞（即時累積）"
 timeout 900 $PY -c "from twq import fetch_fin; fetch_fin.refresh()" || echo "季財報更新失敗（沿用舊資料）"

@@ -180,8 +180,13 @@ def read_summary():
 
 def gzip_old(keep_days=7):
     """Keep every full JSON locally; gzip those older than keep_days that are already reviewed/archived."""
-    files = sorted(p for p in PRED_DIR.glob("*.json") if not p.name.startswith("_"))
-    for p in files[:-keep_days * 2] if len(files) > keep_days * 2 else []:
+    allf = sorted(p for p in PRED_DIR.glob("*.json") if not p.name.startswith("_"))
+    # keep the newest keep_days per list (close-time / preopen); sorting by name alone put every
+    # preopen_* file last, so the newest close-time JSONs were gzipped right after review
+    files = []
+    for grp in ([p for p in allf if not p.name.startswith("preopen_")], [p for p in allf if p.name.startswith("preopen_")]):
+        files += grp[:-keep_days] if len(grp) > keep_days else []
+    for p in files:
         o = json.loads(p.read_text())
         kind, key = _kind_key(o, p.stem)
         if not (PRED_ARCH / f"{kind}_{key}.csv.gz").exists():

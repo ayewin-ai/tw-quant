@@ -241,7 +241,13 @@ def classify(kind, s, ctx, drivers, news_items, inst_row):
 
 def review_one(pred_date, target, news=True, mode="cc"):
     """mode cc: close->close vs TAIEX (close-time list). mode oc: open->close vs universe mean (pre-open list)."""
-    o = json.loads((PRED_DIR / f"{pred_date}.json").read_text())
+    jp = PRED_DIR / f"{pred_date}.json"
+    if jp.exists():
+        o = json.loads(jp.read_text())
+    else:  # already gzipped by archive.gzip_old -> allow re-review (e.g. after a late data fix)
+        import gzip
+        with gzip.open(str(jp) + ".gz", "rt", encoding="utf-8") as f:
+            o = json.load(f)
     stem = pred_date
     if mode == "oc":
         pred_date = o["pred_date"]
