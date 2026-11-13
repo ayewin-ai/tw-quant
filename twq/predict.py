@@ -155,7 +155,7 @@ def score(X, ds, target, booster, meta, top, limitup, mode="base"):
         })
     out = {
         "pred_date": ds, "target_date": target.isoformat() if target else None,
-        "generated_at": dt.datetime.now().isoformat(timespec="seconds"),
+        "generated_at": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
         "universe_size": len(rows), "top_n": top, "model": meta, "market": market_context(X, ds),
         "base_value": float(np.mean(base)), "disclaimer": DISCLAIMER, "mode": mode, "limitup_mode": limitup,
         "overnight": overnight_context(X, ds),
@@ -261,7 +261,7 @@ def render(o):
     title = (f"# 盤前更新預測 — {o['target_date']} 開盤前（含夜盤、美股收盤、隔夜事件）" if pre else
              f"# 台股隔日預測 — 依 {o['pred_date']} 收盤資料，預測 {o['target_date']}")
     L = [title, "", o["disclaimer"], "",
-         f"- 產生時間（box 本地時間 America/Bogota, UTC-5）：{o['generated_at']}",
+         f"- 產生時間（box 本地時間，含時區位移）：{o['generated_at']}",
          f"- 預測範圍：{o['universe_size']} 檔流動性足夠的上市櫃普通股（20日均成交值≥5,000萬、股價≥10元）",
          f"- 模型：LightGBM，訓練資料 {o['model']['train_start']} ~ {o['model']['train_end']}，共 {o['model']['train_rows']:,} 筆",
          (f"- 預測目標：{o['target_date']} 「開盤→收盤」報酬高於全體中位數的機率（盤前可執行版本）" if pre else
