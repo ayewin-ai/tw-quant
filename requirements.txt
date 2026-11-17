@@ -6,3 +6,4 @@ scikit-learn>=1.4
 feedparser>=6.0
 lxml>=5.0
 scipy>=1.11
+pyarrow>=15

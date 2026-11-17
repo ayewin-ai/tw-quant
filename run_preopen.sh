@@ -5,6 +5,10 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 PY=.venv/bin/python
+if [[ ! -x "$PY" ]]; then  # venv 遺失（box 重置/重新 checkout）時自動重建
+  echo "找不到 $PY，重建 .venv ..."
+  python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt || echo "重建 .venv 失敗"
+fi
 echo "=================== $(date '+%F %T %Z') | 台灣 $(TZ=Asia/Taipei date '+%F %H:%M') 盤前更新 ==================="
 TPDATE="${1:-$(TZ=Asia/Taipei date +%F)}"
 $PY -c "from twq import calendar as C; C.ensure_fresh()" || echo "日曆更新失敗（沿用快取）"

@@ -322,3 +322,10 @@
 ## 2026-11-13 auto-fix：預測報告「產生時間」時區標示寫死為波哥大
 - 問題：box 時區已改為 Asia/Taipei，但 `twq/predict.py` 報告仍寫「box 本地時間 America/Bogota, UTC-5」，時間其實是台北時間，標示錯誤。
 - 修正：`generated_at` 改為含時區位移的 ISO 時間（例：2026-11-13T21:41:24+08:00），標籤改為「box 本地時間，含時區位移」。只影響報告文字，模型、權重、驗證未變動；歷史預測檔未改寫。
+
+## 2026-11-17 auto-fix：.venv 遺失導致第一次執行整段失敗
+- 問題：box 上 `tw-quant/.venv` 不見（專案檔案在 21:28 被重新寫入），21:29 的每日流程每一步都出現 `.venv/bin/python: No such file or directory`，還誤報「2026-11-17 休市日」並略過預測（實際上是開市日）。
+- 修正：
+  1. `run_daily.sh`、`run_preopen.sh`、`scripts_backfill_ext.sh`：找不到 `.venv/bin/python` 時自動 `python3 -m venv .venv` 並安裝 requirements。
+  2. `requirements.txt`：補上程式有用到但沒列出的 `pyarrow`。
+- 處理：重建 .venv 後在 21:31 重跑整個流程，正常完成檢討、調權（無採用）、預測 11-18 並推送網站。模型、權重、驗證都未變動；沒有刪除任何歷史資料。

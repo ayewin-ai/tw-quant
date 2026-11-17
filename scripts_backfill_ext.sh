@@ -2,6 +2,10 @@
 # Resumable backfill of extra data (TAIFEX, world markets, quakes, GDELT, zh-TW news counts) since 2024-06.
 cd "$(dirname "$0")"
 PY=.venv/bin/python
+if [[ ! -x "$PY" ]]; then  # venv 遺失（box 重置/重新 checkout）時自動重建
+  echo "找不到 $PY，重建 .venv ..."
+  python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt || echo "重建 .venv 失敗"
+fi
 START="${1:-2024-06-01}"; END="${2:-$(TZ=Asia/Taipei date +%F)}"
 $PY -u -c "
 import datetime as dt
