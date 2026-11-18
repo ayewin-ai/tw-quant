@@ -97,7 +97,8 @@ def market(days, taiex_close: pd.Series, next_day=None):
     day = tx[tx.session == "day"].set_index("date").reindex(days)
     night = tx[tx.session == "night"].set_index("date")
     M["tx_day_ret"] = day["change"] / (day["close"] - day["change"])
-    M["tx_basis"] = day["settle"].fillna(day["close"]) / taiex_close.reindex(days) - 1
+    # 結算日（每月第三個週三）期交所把到期近月的結算價記為 0 → 改用收盤價，避免基差變成 -100%
+    M["tx_basis"] = day["settle"].where(day["settle"] > 0).fillna(day["close"]) / taiex_close.reindex(days) - 1
     M["tx_vol_ratio"] = day["volume"] / day["volume"].rolling(20, min_periods=5).mean()
     fo = ti[ti.who == "foreign"].set_index("date")["net_oi"].reindex(days)
     tr = ti[ti.who == "trust"].set_index("date")["net_oi"].reindex(days)
