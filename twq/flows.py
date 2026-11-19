@@ -162,7 +162,9 @@ def rebal_dates(start: dt.date, end: dt.date, tdays=None):
                     while d.weekday() >= 5:
                         d -= dt.timedelta(days=1)
                     cand = [t for t in tdays if first.isoformat() <= t < nxt.isoformat()]
-                    if cand and cand[-1] <= d.isoformat():
+                    # 只在當月交易日已完整（資料已超過月底）時才改用實際最後交易日；
+                    # 否則月中執行會把生效日誤設成「目前最後一個有資料的交易日」，每天往後漂移
+                    if cand and tdays[-1] >= nxt.isoformat() and cand[-1] <= d.isoformat():
                         d = dt.date.fromisoformat(cand[-1])
                 else:
                     d = first + dt.timedelta(days=(4 - first.weekday()) % 7 + 14)
@@ -172,6 +174,20 @@ def rebal_dates(start: dt.date, end: dt.date, tdays=None):
                 if start <= d <= end:
                     out.append((idx, d.isoformat(), w))
     return sorted(out, key=lambda x: x[1])
+
+
+def _valid_index_events(ie):
+    """Keep only events whose rebal_date is a rule-based rebalance day (older runs stored drifting
+    mid-month dates) and drop contradictory add+del parses for the same (idx, code, rebal_date)."""
+    if ie.empty:
+        return ie
+    from . import features as F
+    lo = dt.date.fromisoformat(min(ie.rebal_date)) - dt.timedelta(days=1)
+    hi = dt.date.fromisoformat(max(ie.rebal_date)) + dt.timedelta(days=45)
+    ok = {(i, r) for i, r, _ in rebal_dates(lo, hi, F.trading_days())}
+    ie = ie[[(i, r) in ok for i, r in zip(ie.idx, ie.rebal_date)]]
+    both = ie.groupby(["idx", "code", "rebal_date"]).action.transform("nunique") > 1
+    return ie[~both]
 
 
 def _names():
@@ -453,8 +469,7 @@ def add_features(X: pd.DataFrame) -> pd.DataFrame:
         X[c] = 0.0
     X["idx_days_to_rebal"] = np.nan
     if not ie.empty:
-        both = ie.groupby(["idx", "code", "rebal_date"]).action.transform("nunique") > 1   # contradictory parse -> drop
-        ie = ie[~both]
+        ie = _valid_index_events(ie).copy()   # rule dates only; contradictory parse -> drop
         ie["a"] = to_pos(ie.ann_date)
         ie["r"] = to_pos(ie.rebal_date)
         ie["w"] = ie.idx.map(lambda k: INDEXES[k][3])
@@ -518,6 +533,7 @@ def review_context(pred_date, target, codes):
     t = target
     ie = _read(f"SELECT ann_date, idx, code, action, rebal_date FROM index_events WHERE rebal_date>=date('{t}','-10 day') "
                f"AND ann_date<='{t}'")
+    ie = _valid_index_events(ie)
     for e in ie.itertuples(index=False):
         if e.code in codes:
             out.setdefault(e.code, []).append(("ETF/指數調整", f"{e.idx} {'納入' if e.action == 'add' else '剔除'}（公告 {e.ann_date}，生效 {e.rebal_date}）"))

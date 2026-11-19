@@ -26,8 +26,15 @@ TAGS = {
 }
 
 
+# 片語中含關鍵字但語意不同（例：「Factset 最新調查：目標價調升」的「調查」不是利空）
+TAG_IGNORE = ["最新調查", "調查顯示", "問卷調查", "市場調查", "修正式"]
+
+
 def tag(title):
-    return [k for k, kws in TAGS.items() if any(w.lower() in title.lower() for w in kws)]
+    t = title
+    for w in TAG_IGNORE:
+        t = t.replace(w, " ")
+    return [k for k, kws in TAGS.items() if any(w.lower() in t.lower() for w in kws)]
 
 
 def headlines(name, code, start: dt.date, end: dt.date, limit=8):
