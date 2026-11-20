@@ -259,7 +259,7 @@
   <p><b>結論：</b>收盤後與盤前模型的 12 組挑戰者都<b>沒有通過護欄</b>，全部維持停用、只報告。⚠️ 僅供研究，不構成投資建議。</p>
 </section>
 <section id="preopen">
-  <h2>6b. 最新盤前更新預測</h2>
+  <h2>6b. 最新盤前更新預測（看好 Top 20 ＋ 最弱 20）</h2>
   <div id="latestPreopen"><p class="muted">尚無盤前更新。</p></div>
 </section>
 
@@ -271,6 +271,14 @@
   <div class="grid2">
     <div class="chartbox"><canvas id="phHit"></canvas></div>
     <div class="chartbox"><canvas id="phAuc"></canvas></div>
+  </div>
+  <h3>看好 Top-20 與最弱 20 檔</h3>
+  <p class="muted">2026-11-20 起，盤前名單由 10 檔擴為 20 檔，兩種模型都另列「最弱 20 檔」（跑贏中位數機率最低、通過同一流動性門檻）。
+  最弱名單「輸給中位數」越高、超額越負，代表模型越能分辨弱勢股。11/20 以前的 Top-20／最弱 20 是依封存的機率與排名回溯計算（當時沒有公布）；
+  原有 Top-10 曲線與表格口徑不變。原始資料：<code>reports/archive/daily_lists_summary.csv</code>。⚠️ 模型預測，不構成投資建議。</p>
+  <div class="grid2">
+    <div class="chartbox"><canvas id="phWeak"></canvas></div>
+    <div class="chartbox"><canvas id="phWeakHit"></canvas></div>
   </div>
   <h3>隔日開盤 vs 收盤：報酬拆解</h3>
   <p class="muted">總報酬（收→收）＝ 跳空（前日收盤→隔日開盤）× 盤中（開盤→收盤）。基準用 0050（加權指數沒有可交易的開盤價）。收盤後名單若只有「跳空」賺錢，代表優勢在收盤後才拿得到的隔夜資訊，實務上買不到。</p>
@@ -308,7 +316,7 @@
 </section>
 
 <section id="latest">
-  <h2>6. 最新預測</h2>
+  <h2>6. 最新預測（收盤後：看好 Top 10 ＋ 最弱 20）</h2>
   <div id="latestPred"></div>
 </section>
 

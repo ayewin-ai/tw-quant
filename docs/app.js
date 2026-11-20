@@ -110,14 +110,26 @@ function renderErr(e) {
       plugins: {title: {display: true, text: '累積錯誤原因統計'}}}});
 }
 
+
+const NOT_ADVICE = '<p class="warn-inline">⚠️ 以下皆為模型依公開資料自動產生的預測排序，僅供研究，<b>不構成投資建議</b>。</p>';
+function weakTable(w, title, note) {
+  if (!w || !w.length) return '';
+  const nd = w.filter(r => r.limitdown).length;
+  return `<h3>${title}</h3><p class="muted">${note} 前一日跌停 ${nd} 檔（⚠️前日跌停：常開低或賣不掉，也常見跌深反彈）。放空/融券有額外成本與限制，本名單只用來檢驗模型能否分辨弱勢股。</p>
+  <table><tr><th>最弱#</th><th>代號</th><th>名稱</th><th>產業</th><th>跑贏機率</th><th>收盤</th><th>當日</th><th>主要看空因素</th></tr>
+  ${w.map(r => `<tr><td>${r.weak_rank}</td><td>${r.code}</td><td>${r.name}${r.limitdown ? ' ⚠️前日跌停' : ''}${r.limitup ? ' ⚠️前日漲停' : ''}</td><td>${r.industry}</td><td>${(r.prob * 100).toFixed(1)}%</td><td>${r.close}</td>
+    <td class="${cls(r.r1)}">${pct(r.r1)}</td><td>${(r.neg || []).join('；')}</td></tr>`).join('')}</table>`;
+}
+
 function renderPred(p) {
   const m = p.market;
-  $('latestPred').innerHTML = `<p>依 <b>${p.pred_date}</b> 收盤資料，預測 <b>${p.target_date}</b>（股票池 ${p.universe_size} 檔；訓練 ${p.model.train_start} ~ ${p.model.train_end}，${p.model.train_rows.toLocaleString()} 筆）。</p>
+  $('latestPred').innerHTML = NOT_ADVICE + `<h3>看好 Top ${p.top.length}</h3><p>依 <b>${p.pred_date}</b> 收盤資料，預測 <b>${p.target_date}</b>（股票池 ${p.universe_size} 檔；訓練 ${p.model.train_start} ~ ${p.model.train_end}，${p.model.train_rows.toLocaleString()} 筆）。</p>
   <p class="muted">市場：加權 ${pct(m.mkt_r1)}、櫃買 ${pct(m.otc_r1)}、上漲家數 ${pct(m.breadth, 0, false)}；前一晚費半 ${pct(m.us_sox)}、台積電 ADR ${pct(m.us_tsm)}。機率＝隔日跑贏全體中位數的機率。</p>
   <table><tr><th>#</th><th>代號</th><th>名稱</th><th>產業</th><th>機率</th><th>收盤</th><th>當日</th><th>主要看多因素</th><th>扣分因素</th></tr>
   ${p.top.map(r => `<tr><td>${r.rank}</td><td>${r.code}</td><td>${r.name}</td><td>${r.industry}</td><td>${(r.prob * 100).toFixed(1)}%</td><td>${r.close}</td>
     <td class="${cls(r.r1)}">${pct(r.r1)}</td><td>${r.pos.join('；')}</td><td>${r.neg.join('；')}</td></tr>`).join('')}</table>
-  <p class="muted">⚠️ 非投資建議。前一日漲停股隔日常開高或買不到。</p>`;
+  <p class="muted">⚠️ 非投資建議。前一日漲停股隔日常開高或買不到。</p>` +
+  weakTable(p.weak, `最弱 ${(p.weak || []).length} 檔（模型預測最可能落後）`, '隔日跑贏全體中位數機率最低、且通過相同流動性門檻的股票（＝預期相對落後，不代表一定下跌）。');
 }
 
 function renderReview(r) {
@@ -131,6 +143,10 @@ function renderReview(r) {
     <table><tr><th>#</th><th>代號</th><th>名稱</th><th>產業</th><th>機率</th><th>實際</th><th>超額</th></tr>
     ${r.top.map(t => `<tr><td>${t.rank}</td><td>${t.code}</td><td>${t.name}</td><td>${t.industry}</td><td>${(t.prob * 100).toFixed(1)}%</td>
       <td class="${cls(t.ret)}">${pct(t.ret)}</td><td class="${cls(t.excess)}">${pct(t.excess)}</td></tr>`).join('')}</table>
+    ${r.weak && r.weak.length ? `<h3>最弱 ${r.weak.length} 檔實際結果</h3><p class="muted">輸給中位數 ${pct(p.weak_lose_median, 0, false)}、輸給加權 ${pct(p.weak_lose_bench, 0, false)}；平均 ${pct(p.weak_avg_ret)}、平均超額 ${pct(p.weak_avg_excess)}（越負＝模型越準）；跳空 ${pct(p.weak_gap)}、盤中 ${pct(p.weak_intraday)}。</p>
+    <table><tr><th>最弱#</th><th>代號</th><th>名稱</th><th>機率</th><th>實際</th><th>超額</th></tr>
+    ${r.weak.map(t => `<tr><td>${t.weak_rank}</td><td>${t.code}</td><td>${t.name}${t.limitdown ? ' ⚠️前日跌停' : ''}</td><td>${(t.prob * 100).toFixed(1)}%</td>
+      <td class="${cls(t.ret)}">${pct(t.ret)}</td><td class="${cls(t.excess)}">${pct(t.excess)}</td></tr>`).join('')}</table>` : ''}
     <h3>根因分析</h3>${cases}
     <p><a onclick="showMd('reports/review/${r.markdown}')" href="#reports">看完整檢討報告（含新聞標題與特徵貢獻）</a></p>`;
 }
@@ -189,11 +205,14 @@ function renderCalendar(c) {
 function renderPreopen(p) {
   const o = p.overnight || {};
   if (p.void) { $('latestPreopen').innerHTML = `<p><b class="neg">⚠️ 作廢：</b>${p.void_reason}。下一次盤前預測會在下一個交易日開盤前產生。</p>`; return; }
-  $('latestPreopen').innerHTML = `<p>目標日 <b>${p.target_date}</b>（以 ${p.pred_date} 收盤資料＋隔夜資訊；特徵組 ${p.model.feature_set}，目標＝開盤→收盤）。</p>
+  $('latestPreopen').innerHTML = NOT_ADVICE + `<p>目標日 <b>${p.target_date}</b>（以 ${p.pred_date} 收盤資料＋隔夜資訊；特徵組 ${p.model.feature_set}，目標＝開盤→收盤）。</p>
   <p class="muted">台指期夜盤 ${pct(o.tx_night_ret)}、費半 ${pct(o.us_sox_on)}、台積電 ADR ${pct(o.us_tsm_on)}、那指 ${pct(o.us_ndx_on)}、美元/台幣 ${pct(o.usdtwd_on)}</p>
+  <h3>看好 Top ${p.top.length}（開盤→收盤跑贏全體中位數的機率最高）</h3>
   <table><tr><th>#</th><th>代號</th><th>名稱</th><th>產業</th><th>機率</th><th>前日漲跌</th><th>主要因素</th></tr>
   ${p.top.map(r => `<tr><td>${r.rank}</td><td>${r.code}</td><td>${r.name}${r.limitup ? ' ⚠️漲停追高' : ''}</td><td>${r.industry}</td><td>${(r.prob * 100).toFixed(1)}%</td>
-    <td class="${cls(r.r1)}">${pct(r.r1)}</td><td>${r.pos.join('；')}</td></tr>`).join('')}</table>`;
+    <td class="${cls(r.r1)}">${pct(r.r1)}</td><td>${r.pos.join('；')}</td></tr>`).join('')}</table>
+  ${p.top.length > 10 ? '<p class="muted">2026-11-20 起盤前名單由 10 檔擴為 20 檔；歷史曲線的「Top-10」仍只算前 10 名，另加「Top-20」序列。</p>' : ''}` +
+  weakTable(p.weak, `最弱 ${(p.weak || []).length} 檔（開盤→收盤最可能落後）`, '開盤→收盤跑贏全體中位數機率最低、且通過相同流動性門檻的股票（＝預期相對落後，不代表一定下跌）。');
 }
 
 
@@ -209,6 +228,7 @@ function renderPredHistory(ph) {
   charts.phCum = new Chart($('phCum'), {type: 'line', data: {labels: D, datasets: [
     L('收盤後 Top-10 累積超額（收→收，對加權，未扣成本、實務難執行）', cum('close_top10_avg_excess'), '#4fa3ff'),
     L('盤前 Top-10 累積報酬（開→收，扣成本）', cum('preopen_top10_net_ret'), '#3ddc97'),
+    L('盤前 Top-20 累積報酬（開→收，扣成本；11/20 前為回溯計算）', cum('preopen_top20_net_ret'), '#9ff0c8', {borderDash: [6, 3]}),
     L('加權指數累積', cum('taiex_ret'), '#ffffff', {borderDash: [6, 4]})]}, options: opt('累積報酬')});
   charts.phHit = new Chart($('phHit'), {type: 'line', data: {labels: D, datasets: [
     L('收盤後 上漲比例（累積）', cumHit('close_top10_up'), '#4fa3ff'),
@@ -217,6 +237,18 @@ function renderPredHistory(ph) {
     L('盤前 勝過全體平均（累積）', cumHit('preopen_top10_beat'), '#9ff0c8', {borderDash: [4, 3]}),
     L('收盤後 勝過加權（20日滾動）', roll('close_top10_beat'), '#ffd166', {pointRadius: 0, borderWidth: 1}),
     L('50%', D.map(() => 0.5), '#888', {pointRadius: 0, borderWidth: 1, borderDash: [2, 2]})]}, options: opt('Top-10 命中率')});
+  if ($('phWeak')) charts.phWeak = new Chart($('phWeak'), {type: 'line', data: {labels: D, datasets: [
+    L('收盤後 最弱20 累積超額（收→收，對加權；越低越準）', cum('close_weak20_avg_excess'), '#ff6b6b'),
+    L('盤前 最弱20 累積超額（開→收，對全體平均；越低越準）', cum('preopen_weak20_avg_excess'), '#ffa94d'),
+    L('盤前 Top-20 累積超額（開→收，對全體平均）', cum('preopen_top20_avg_excess'), '#3ddc97'),
+    L('收盤後 最弱20 累積 跳空', cum('close_weak20_gap'), '#c084fc', {borderDash: [4, 3]}),
+    L('收盤後 最弱20 累積 盤中', cum('close_weak20_intraday'), '#ffd166', {borderDash: [4, 3]})]},
+    options: opt('最弱 20 檔 vs 看好 Top-20（11/20 前為依封存機率回溯計算，未扣成本）')});
+  if ($('phWeakHit')) charts.phWeakHit = new Chart($('phWeakHit'), {type: 'line', data: {labels: D, datasets: [
+    L('收盤後 最弱20 輸給中位數（累積）', cumHit('close_weak20_lose_median'), '#ff6b6b'),
+    L('盤前 最弱20 輸給中位數（累積）', cumHit('preopen_weak20_lose_median'), '#ffa94d'),
+    L('盤前 Top-20 勝過全體平均（累積）', cumHit('preopen_top20_beat'), '#3ddc97'),
+    L('50%', D.map(() => 0.5), '#888', {pointRadius: 0, borderWidth: 1, borderDash: [2, 2]})]}, options: opt('最弱 20 命中率（輸給中位數＝預測正確）')});
   charts.phAuc = new Chart($('phAuc'), {type: 'line', data: {labels: D, datasets: [
     L('收盤後 AUC', rows.map(r => v(r, 'close_auc')), '#4fa3ff'),
     L('盤前 AUC', rows.map(r => v(r, 'preopen_auc')), '#3ddc97'),
@@ -245,8 +277,13 @@ function renderPredHistory(ph) {
     ['preopen_rank_ic', '盤前 Rank IC', 'n'], ['taiex_ret', '加權指數', 'p'],
     ['close_top10_gap', '收盤後 跳空', 'p'], ['close_top10_intraday', '收盤後 盤中', 'p'], ['close_top10_total', '收盤後 總計', 'p'],
     ['preopen_top10_gap', '盤前 跳空', 'p'], ['preopen_top10_intraday', '盤前 盤中', 'p'], ['preopen_top10_total', '盤前 總計', 'p'],
+    ['preopen_top20_up', '盤前Top20 上漲比例', 'r'], ['preopen_top20_beat', '盤前Top20 勝過全體', 'r'], ['preopen_top20_avg_ret', '盤前Top20 開→收平均', 'p'],
+    ['close_weak20_lose_median', '收盤後最弱20 輸中位數', 'r'], ['close_weak20_avg_excess', '收盤後最弱20 超額', 'p'],
+    ['close_weak20_gap', '收盤後最弱20 跳空', 'p'], ['close_weak20_intraday', '收盤後最弱20 盤中', 'p'],
+    ['preopen_weak20_lose_median', '盤前最弱20 輸中位數', 'r'], ['preopen_weak20_avg_excess', '盤前最弱20 超額', 'p'],
+    ['preopen_weak_live', '最弱20 即時記錄(1)/回溯(0)', 'n0'],
     ['bm0050_gap', '0050 跳空', 'p'], ['bm0050_intraday', '0050 盤中', 'p'], ['bm0050_total', '0050 總計', 'p']];
-  const fmt = (x, t) => x == null ? '—' : t === 'r' ? `${Math.round(x * 100)}%` : t === 'p' ? `<span class="${cls(x)}">${pct(x)}</span>` : t === 'n' ? x.toFixed(3) : x;
+  const fmt = (x, t) => x == null ? '—' : t === 'r' ? `${Math.round(x * 100)}%` : t === 'p' ? `<span class="${cls(x)}">${pct(x)}</span>` : t === 'n' ? x.toFixed(3) : t === 'n0' ? String(x) : x;
   let sortK = 'target_date', asc = false;
   const draw = () => {
     const rs = [...rows].sort((a, b) => { const x = a[sortK], y = b[sortK]; if (x == null) return 1; if (y == null) return -1; return (x < y ? -1 : x > y ? 1 : 0) * (asc ? 1 : -1); });

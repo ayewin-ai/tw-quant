@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from . import db
-from .config import ROOT, MODEL_DIR, REPORT_DIR, PRED_DIR, TOP_N, DISCLAIMER
+from .config import ROOT, MODEL_DIR, REPORT_DIR, PRED_DIR, TOP_N, DISCLAIMER, PREOPEN_TOP_N, WEAK_N
 
 DOCS = ROOT / "docs"
 OUT = DOCS / "data"
@@ -59,10 +59,17 @@ def _calendar_payload():
                     "臨時休市（颱風假等）：依證交所公告事後記入 config/calendar_overrides.json，其餘以實際成交資料為準"]})
 
 
+def _weak_payload(o):
+    """最弱 N 檔（新格式才有 weak_rank；舊格式回傳空 list）。"""
+    w = sorted((r for r in o["predictions"] if r.get("weak_rank")), key=lambda r: r["weak_rank"])
+    return [{k: r.get(k) for k in ("weak_rank", "rank", "code", "name", "industry", "prob", "close", "r1", "limitdown", "limitup")} |
+            {"neg": [f"{f['label']} {f['value_str']}" for f in r["factors_neg"][:3]]} for r in w]
+
+
 def build():
     OUT.mkdir(parents=True, exist_ok=True)
     meta = {"generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "disclaimer": DISCLAIMER,
-            "top_n": TOP_N}
+            "top_n": TOP_N, "preopen_top_n": PREOPEN_TOP_N, "weak_n": WEAK_N}
 
     # coverage
     con = db.connect()
@@ -149,12 +156,25 @@ def build():
                {"pos": [f"{f['label']} {f['value_str']}" for f in r["factors_pos"][:3]]} for r in o["predictions"][: o["top_n"]]]
         _dump("latest_preopen.json", {"target_date": o["target_date"], "pred_date": o["pred_date"],
                                       "void": o.get("void", False), "void_reason": o.get("void_reason"),
-                                      "overnight": o.get("overnight"), "model": o["model"], "top": top})
+                                      "overnight": o.get("overnight"), "model": o["model"], "top": top,
+                                      "top_n": o["top_n"], "weak": _weak_payload(o)})
     try:
         from . import archive
         comp = archive.write_comparison()
         if comp is not None:
             c = comp.reset_index()
+            if archive.LISTS.exists():  # Top-20 / 最弱 20 每日指標（另檔，append-only）
+                ls = pd.read_csv(archive.LISTS).drop_duplicates(["kind", "pred_date"], keep="first")
+                keep = ["top20_live", "top20_up", "top20_beat", "top20_avg_ret", "top20_avg_excess", "top20_gap",
+                        "top20_intraday", "weak_live", "weak20_up", "weak20_lose_median", "weak20_lose_bench",
+                        "weak20_avg_ret", "weak20_avg_excess", "weak20_gap", "weak20_intraday", "weak20_total",
+                        "weak20_limitdown"]
+                for kind in ("close", "preopen"):
+                    k = ls[ls.kind == kind].set_index("target_date")[keep].add_prefix(f"{kind}_")
+                    c = c.join(k, on="target_date")
+                if "preopen_top20_avg_ret" in c:
+                    from .model import COST_ROUNDTRIP
+                    c["preopen_top20_net_ret"] = c["preopen_top20_avg_ret"] - COST_ROUNDTRIP
             _dump("pred_history.json", {"columns": list(c.columns),
                                         "rows": c.astype(object).where(c.notna(), None).values.tolist()})
     except Exception as e:
@@ -191,9 +211,11 @@ def build():
         _dump("latest_prediction.json", {"pred_date": o["pred_date"], "target_date": o["target_date"],
                                          "universe_size": o["universe_size"], "market": o["market"],
                                          "model": o["model"], "top": top, "overnight": o.get("overnight"),
+                                         "weak": _weak_payload(o),
                                          "history": [p.stem for p in preds][-60:]})
     # latest review (parse structured data from logs)
-    reviews = sorted((REPORT_DIR / "review").glob("review_*.md"))
+    # 收盤後名單的檢討（排除 review_preopen_*：字母排序會排在最後，導致 perf 空白、網站最新檢討壞掉）
+    reviews = sorted(p for p in (REPORT_DIR / "review").glob("review_*.md") if not p.name.startswith("review_preopen_"))
     if reviews:
         pdate = reviews[-1].stem.replace("review_", "")
         pf = pd.read_csv(REPORT_DIR / "performance_log.csv", dtype={"pred_date": str})
@@ -213,7 +235,12 @@ def build():
                 topres.append({"rank": r["rank"], "code": r["code"], "name": r["name"], "industry": r["industry"],
                                "prob": r["prob"], "ret": ret,
                                "excess": None if ret is None else ret - (perf.get("taiex") or 0)})
-        _dump("latest_review.json", {"pred_date": pdate, "perf": perf, "top": topres, "cases": cases,
+        weakres = []
+        if pj.exists() and perf.get("target_date"):
+            for r in _weak_payload(o):
+                ret = act.get(r["code"])
+                weakres.append({**r, "ret": ret, "excess": None if ret is None else ret - (perf.get("taiex") or 0)})
+        _dump("latest_review.json", {"pred_date": pdate, "perf": perf, "top": topres, "cases": cases, "weak": weakres,
                                      "markdown": reviews[-1].name})
         # copy markdown reports for direct viewing
     rep = DOCS / "reports"

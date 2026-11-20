@@ -6,6 +6,11 @@
   target day has data; rows are only ever appended, never rewritten. Sharded by month because the full history
   grows ~60 MB/year and GitHub rejects files > 100 MB.
 - reports/archive/daily_summary.csv : one row per (kind, pred_date) with Top-N hit rate, avg return, excess, AUC.
+  (Top-N here is always Top-10 for continuity, even after the pre-open list grew to 20 on 2026-11-20.)
+- reports/archive/daily_lists_summary.csv : one row per (kind, pred_date) with Top-20 and Weakest-20 metrics
+  (added 2026-11-20; append-only). Top-20 rows for earlier dates are recomputed from the archived ranks
+  (top20_live=0: that list was not shown at the time); weakest-20 likewise (weak_live=0 = rebuilt from the
+  archived prob/rank; weak_live=1 = the list recorded at prediction time).
 """
 import gzip
 import json
@@ -47,6 +52,8 @@ def archive_prediction(path, o=None, stem=None):
     rows = [{"pred_date": o["pred_date"], "target_date": o["target_date"], "code": r["code"], "name": r["name"],
              "industry": r.get("industry"), "rank": r["rank"], "prob": round(r["prob"], 5), "r1": r.get("r1"),
              "close": r.get("close"), "limitup": r.get("limitup"),
+             **({"limitdown": r.get("limitdown"), "liquid": r.get("liquid"), "weak_rank": r.get("weak_rank")}
+                if "weak_rank" in r else {}),
              "feature_set": o.get("model", {}).get("feature_set", "base"), "label": o.get("model", {}).get("label", "y"),
              "top_pos": _factors(r.get("factors_pos")), "top_neg": _factors(r.get("factors_neg"))}
             for r in o["predictions"]]
@@ -173,6 +180,107 @@ def update_vs_actual(top_n=10):
     return added
 
 
+LISTS = ARCH / "daily_lists_summary.csv"
+TOP_WIDE = 20
+_STAT = ["n", "up", "beat", "beat_median", "avg_ret", "avg_excess", "gap", "intraday", "total", "ex_oc_0050", "beat_taiex_cc"]
+LIST_COLS = (["kind", "pred_date", "target_date", "basis", "n", "top20_live"] + [f"top20_{k}" for k in _STAT] +
+             ["weak_live"] + [f"weak20_{k}" for k in _STAT if k != "beat_median"] +
+             ["weak20_lose_median", "weak20_lose_bench", "weak20_limitdown",
+              "taiex_cc", "bm_gap", "bm_oc", "bm_cc", "universe_avg_ret"])
+
+
+def _outcome_frame(f):
+    """Join one archived prediction csv with target-day actuals (same rules as update_vs_actual)."""
+    kind = f.name.split("_")[0]
+    p = pd.read_csv(f, dtype={"code": str})
+    if p.empty:
+        return None
+    pdte, tgt = p.pred_date.iloc[0], p.target_date.iloc[0]
+    from . import calendar as _cal
+    if not _cal.is_trading_day(tgt):
+        if kind == "preopen":
+            return None
+        nt = _cal.next_trading_day(pdte)
+        if nt is None:
+            return None
+        tgt = nt.isoformat()
+    px, taiex = _actuals(tgt)
+    if px.empty:
+        return None
+    d = p.rename(columns={"close": "pred_close"}).join(px, on="code", how="inner")
+    d = d[d.ret.notna()].copy()
+    if d.empty:
+        return None
+    d["ret_cc"] = d.ret
+    d["ret_oc"] = d.close / d.open - 1
+    d["gap"] = d.open / (d.close / (1 + d.ret)) - 1
+    for c in ("ret_oc", "gap"):
+        d.loc[~np.isfinite(d[c]), c] = np.nan
+    bg, bo, bc = _bench(tgt)
+    d["excess_cc"] = d.ret_cc - (taiex or 0)
+    d["excess_oc"] = d.ret_oc - (bo if bo is not None else np.nan)
+    d["excess_oc_univ"] = d.ret_oc - d.ret_oc.mean()
+    return kind, pdte, tgt, taiex, (bg, bo, bc), d
+
+
+def _list_stats(x, d, basis, pfx):
+    """x: the list's rows; d: whole universe (for median). basis cc: close→close vs TAIEX; oc: open→close vs universe mean."""
+    r_all = d.ret_oc if basis == "oc" else d.ret_cc
+    r = x.ret_oc if basis == "oc" else x.ret_cc
+    ex = x.excess_oc_univ if basis == "oc" else x.excess_cc
+    med = r_all.median()
+    return {f"{pfx}_n": len(x), f"{pfx}_up": (r > 0).mean(), f"{pfx}_beat": (ex > 0).mean(),
+            f"{pfx}_beat_median": (r > med).mean(), f"{pfx}_avg_ret": r.mean(), f"{pfx}_avg_excess": ex.mean(),
+            f"{pfx}_gap": x.gap.mean(), f"{pfx}_intraday": x.ret_oc.mean(), f"{pfx}_total": x.ret_cc.mean(),
+            f"{pfx}_ex_oc_0050": x.excess_oc.mean(), f"{pfx}_beat_taiex_cc": (x.excess_cc > 0).mean()}
+
+
+def update_lists_summary():
+    """Append Top-20 / Weakest-20 outcome metrics per (kind, pred_date). Append-only, never rewrites rows."""
+    ARCH.mkdir(parents=True, exist_ok=True)
+    have = set()
+    if LISTS.exists():
+        have = set(map(tuple, pd.read_csv(LISTS, usecols=["kind", "pred_date"], dtype=str).values))
+    rows = []
+    for f in sorted(PRED_ARCH.glob("*.csv.gz")):
+        kind = f.name.split("_")[0]
+        pdte = pd.read_csv(f, usecols=["pred_date"], nrows=1, dtype=str)
+        if pdte.empty or (kind, pdte.pred_date.iloc[0]) in have:
+            continue
+        res = _outcome_frame(f)
+        if res is None:
+            continue
+        kind, pdte, tgt, taiex, (bg, bo, bc), d = res
+        basis = "oc" if kind == "preopen" else "cc"
+        top = d[d["rank"] <= TOP_WIDE]
+        row = {"kind": kind, "pred_date": pdte, "target_date": tgt, "basis": basis, "n": len(d),
+               "top20_live": int(kind == "preopen" and "weak_rank" in d.columns),
+               **_list_stats(top, d, basis, "top20")}
+        live = "weak_rank" in d.columns and d.weak_rank.notna().any()
+        if live:
+            wk = d[d.weak_rank.notna()]
+        else:  # older archive: rebuild = 20 lowest prob outside the Top-10 (universe already used the same
+            #      5,000 萬 liquidity floor as weights v1, so this matches what the new code would have listed)
+            wk = d[d["rank"] > 10].nsmallest(20, "prob")
+            wk = wk.assign(limitdown=wk.r1 <= -0.095) if "r1" in wk else wk
+        st = _list_stats(wk, d, basis, "weak20")
+        st["weak20_lose_median"] = 1 - st.pop("weak20_beat_median")
+        st["weak20_lose_bench"] = 1 - st["weak20_beat"]   # cc: lost to TAIEX; oc: lost to universe open→close mean
+        st["weak20_limitdown"] = int(wk["limitdown"].fillna(False).astype(bool).sum()) if "limitdown" in wk else None
+        row.update(st)
+        row["weak_live"] = int(live)
+        row.update({"taiex_cc": taiex, "bm_gap": bg, "bm_oc": bo, "bm_cc": bc,
+                    "universe_avg_ret": (d.ret_oc if basis == "oc" else d.ret_cc).mean()})
+        rows.append(row)
+    if not rows:
+        return 0
+    s = pd.DataFrame(rows).round(5)
+    cols = list(pd.read_csv(LISTS, nrows=0).columns) if LISTS.exists() else LIST_COLS
+    s = s.reindex(columns=cols)   # fixed header: weak20_* columns exist even when the first rows have none
+    s.to_csv(LISTS, mode="a", header=not LISTS.exists(), index=False)
+    return len(s)
+
+
 def read_summary():
     """daily_summary.csv with one row per (kind, pred_date): older runs appended some days twice; keep the first."""
     return pd.read_csv(SUMMARY).drop_duplicates(["kind", "pred_date"], keep="first")
@@ -230,6 +338,10 @@ def write_comparison():
 def run():
     a = archive_all()
     b = update_vs_actual()
+    try:
+        update_lists_summary()
+    except Exception as e:
+        print("lists summary error", e)
     try:
         gzip_old()
     except Exception as e:

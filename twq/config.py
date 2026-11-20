@@ -24,7 +24,10 @@ UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chr
 # Universe / liquidity filter
 MIN_AVG_VALUE = 50_000_000      # 20 日平均成交金額 >= 5,000 萬元
 MIN_PRICE = 10.0
-TOP_N = 10
+TOP_N = 10                      # 收盤後名單 Top-N（也是所有歷史 Top-10 指標/曲線/調權護欄的口徑）
+PREOPEN_TOP_N = 20              # 盤前名單顯示 Top-20（2026-11-20 起；Top-10 指標仍另外保留以維持連續性）
+WEAK_N = 20                     # 最弱 N 檔（跑贏中位數機率最低、且通過同一流動性門檻）
+LIMIT_MOVE = 0.095              # 前日漲停/跌停旗標門檻（|r1| ≥ 9.5%）
 
 US_SYMBOLS = {"^SOX": "sox", "TSM": "tsm_adr", "^GSPC": "spx", "^IXIC": "nasdaq", "^VIX": "vix"}
 

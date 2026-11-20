@@ -274,6 +274,8 @@ def review_one(pred_date, target, news=True, mode="cc"):
     df["y"] = (df.ret > df.ret.median()).astype(int)
     top_n = o["top_n"]
     top = df[df["rank"] <= top_n].sort_values("rank")
+    top10 = df[df["rank"] <= 10]            # 歷史 Top-10 指標口徑（performance_log / 曲線連續性）
+    weak = df[df["weak_rank"].notna()].sort_values("weak_rank") if "weak_rank" in df else df.iloc[0:0]
     ctx = {"mkt": mkt, "us": us, "target_day": dt.date.fromisoformat(target).day,
            "ext": _ext_context(pred_date, target), "mode": mode, "target": target}
     try:
@@ -291,14 +293,25 @@ def review_one(pred_date, target, news=True, mode="cc"):
     top_dec, bot_dec = df.excess[dec == 9].mean(), df.excess[dec == 0].mean()
     breadth = float((df.ret > 0).mean())
     perf = {"pred_date": pred_date, "target_date": target, "n_universe": len(df),
-            "top_hit_abs": float((top.ret > 0).mean()), "top_hit_excess": float((top.excess > 0).mean()),
-            "top_avg_ret": float(top.ret.mean()), "top_avg_excess": float(top.excess.mean()),
+            "top_hit_abs": float((top10.ret > 0).mean()), "top_hit_excess": float((top10.excess > 0).mean()),
+            "top_avg_ret": float(top10.ret.mean()), "top_avg_excess": float(top10.excess.mean()),
+            "list_n": int(len(top)),
             "universe_avg_ret": float(df.ret.mean()), "auc": auc, "rank_ic": ic,
             "top_decile_excess": float(top_dec), "bottom_decile_excess": float(bot_dec),
             "taiex": idx.get("TAIEX"), "bench": mkt, "otc": otc, "breadth": breadth,
             "us_sox": us.get("sox"), "us_tsm": us.get("tsm_adr"), "mode": mode}
     for k in ("night_ret", "asia", "geo_z", "quake"):
         perf[k] = ctx["ext"].get(k)
+    med = float(df.ret.median())
+    if top_n > 10:
+        perf.update({"top20_hit_abs": float((top.ret > 0).mean()), "top20_hit_excess": float((top.excess > 0).mean()),
+                     "top20_avg_ret": float(top.ret.mean()), "top20_avg_excess": float(top.excess.mean())})
+    if len(weak):
+        perf.update({"weak_n": int(len(weak)), "weak_up": float((weak.ret > 0).mean()),
+                     "weak_lose_median": float((weak.ret < med).mean()), "weak_lose_bench": float((weak.excess < 0).mean()),
+                     "weak_avg_ret": float(weak.ret.mean()), "weak_avg_excess": float(weak.excess.mean()),
+                     "weak_gap": float(weak.gap.mean()), "weak_intraday": float(weak.intra.mean()),
+                     "weak_limitdown": int(weak.get("limitdown", pd.Series(dtype=bool)).fillna(False).astype(bool).sum())})
 
     # monthly revenue context
     con = db.connect()
@@ -340,6 +353,8 @@ def review_one(pred_date, target, news=True, mode="cc"):
     sec = df.groupby("industry").agg(n=("ret", "size"), ret=("ret", "mean"), ex=("excess", "mean"),
                                      prob=("prob", "mean")).query("n>=3").sort_values("ex")
     md = render(o, perf, top, analyses, sec, us, us_dates, df)
+    if len(weak):
+        md += weak_section(weak, perf, mode, med)
     try:
         md += gap_section(df, top_n, ctx, inst, exd, avg_vol, analyses, us)
     except Exception as e:
@@ -472,10 +487,21 @@ def render(o, perf, top, analyses, sec, us, us_dates, df):
     if oc:
         L += ["> 盤前名單的目標是「開盤買、收盤賣」：以下報酬皆為目標日開盤→收盤，"
               "「超額」相對於全體股票開→收平均（非加權指數）。", ""]
+    n10 = min(len(top), 10)
+    bm = '勝過全體開→收平均' if oc else '勝過大盤'
     L += ["## 總結", "",
-         f"- Top {o['top_n']}：上漲 {int(round(perf['top_hit_abs'] * len(top)))}/{len(top)}（{_p(perf['top_hit_abs'], False)}），"
-         f"{'勝過全體開→收平均' if oc else '勝過大盤'} {int(round(perf['top_hit_excess'] * len(top)))}/{len(top)}（{_p(perf['top_hit_excess'], False)}）",
-         f"- Top {o['top_n']} 平均報酬 {_p(perf['top_avg_ret'])}，平均超額 {_p(perf['top_avg_excess'])}；全體平均 {_p(perf['universe_avg_ret'])}",
+         f"- Top 10：上漲 {int(round(perf['top_hit_abs'] * n10))}/{n10}（{_p(perf['top_hit_abs'], False)}），"
+         f"{bm} {int(round(perf['top_hit_excess'] * n10))}/{n10}（{_p(perf['top_hit_excess'], False)}）",
+         f"- Top 10 平均報酬 {_p(perf['top_avg_ret'])}，平均超額 {_p(perf['top_avg_excess'])}；全體平均 {_p(perf['universe_avg_ret'])}"]
+    if perf.get("top20_hit_abs") is not None:
+        L += [f"- Top {len(top)} 名單：上漲 {int(round(perf['top20_hit_abs'] * len(top)))}/{len(top)}（{_p(perf['top20_hit_abs'], False)}），"
+              f"{bm} {int(round(perf['top20_hit_excess'] * len(top)))}/{len(top)}（{_p(perf['top20_hit_excess'], False)}）；"
+              f"平均報酬 {_p(perf['top20_avg_ret'])}，平均超額 {_p(perf['top20_avg_excess'])}"]
+    if perf.get("weak_n"):
+        L += [f"- 最弱 {perf['weak_n']}：輸給中位數 {_p(perf['weak_lose_median'], False)}、"
+              f"{'輸給全體開→收平均' if oc else '輸給加權'} {_p(perf['weak_lose_bench'], False)}；平均報酬 {_p(perf['weak_avg_ret'])}，"
+              f"平均超額 {_p(perf['weak_avg_excess'])}（越負＝模型越準）"]
+    L += [
          f"- 全體 {perf['n_universe']} 檔：AUC(跑贏中位數) {perf['auc']:.3f}，Rank IC {perf['rank_ic']:+.3f}；"
          f"最高十分位超額 {_p(perf['top_decile_excess'])} vs 最低十分位 {_p(perf['bottom_decile_excess'])}",
          f"- 市場：加權 {_p(perf['taiex'])}、櫃買 {_p(perf['otc'])}、上漲家數比例 {_p(perf['breadth'], False)}",
@@ -483,7 +509,7 @@ def render(o, perf, top, analyses, sec, us, us_dates, df):
          f"那指 {_p(us.get('nasdaq'))}、S&P500 {_p(us.get('spx'))}",
          f"- 台指期夜盤 {_p(perf.get('night_ret'))}；目標日亞股平均 {_p(perf.get('asia'))}；地緣政治新聞Z {perf.get('geo_z') if perf.get('geo_z') is None else round(perf['geo_z'], 1)}；"
          f"地震 M{perf.get('quake') or 0}", "",
-         "## Top 名單逐檔結果", "",
+         f"## Top {len(top)} 名單逐檔結果", "",
          "| # | 代號 | 名稱 | 產業 | 機率 | 實際報酬 | 超額 | 產業超額 | 個股特有 | 結果 |", "|---|---|---|---|---|---|---|---|---|---|"]
     for c, r in top.iterrows():
         res = "✅" if r.excess > 0 and r.ret > 0 else ("🟡 勝大盤但下跌" if r.excess > 0 else ("🔴 大幅錯誤" if r.ret <= -0.03 else "❌"))
@@ -511,6 +537,32 @@ def render(o, perf, top, analyses, sec, us, us_dates, df):
     for c, n in cnt.most_common():
         L.append(f"- **{c}** ×{n}：{SUGGEST.get(c, '')}")
     L += ["", f"累積統計見 `{PATTERNS}`。"]
+    return "\n".join(L) + "\n"
+
+
+def weak_section(weak, perf, mode, med):
+    """最弱 N 檔的檢討：是否真的落後（輸給中位數/基準）、收盤後名單另拆跳空 vs 盤中。"""
+    oc = mode == "oc"
+    L = ["", f"## 最弱 {len(weak)} 檔檢討（模型預測最可能落後；非投資建議）", "",
+         f"- 判定：報酬低於全體中位數（{_p(med)}）＝ ✅ 預測正確（確實落後）；高於中位數 ＝ ❌（沒有落後）。",
+         f"- 輸給中位數 {int(round(perf['weak_lose_median'] * len(weak)))}/{len(weak)}，"
+         f"{'輸給全體開→收平均' if oc else '輸給加權'} {int(round(perf['weak_lose_bench'] * len(weak)))}/{len(weak)}；"
+         f"上漲 {int(round(perf['weak_up'] * len(weak)))}/{len(weak)}；平均報酬 {_p(perf['weak_avg_ret'])}、平均超額 {_p(perf['weak_avg_excess'])}",
+         ]
+    if not oc:
+        L.append(f"- 收盤→收盤拆解：平均跳空 {_p(perf['weak_gap'])}、平均盤中（開→收）{_p(perf['weak_intraday'])}"
+                 "（若落後主要發生在跳空，代表開盤後才知道的人來不及反應）")
+    if perf.get("weak_limitdown"):
+        L.append(f"- 其中前一日跌停 {perf['weak_limitdown']} 檔（⚠️前日跌停：常開低或賣不掉，也常見跌深反彈）")
+    L += ["", "| 最弱# | 代號 | 名稱 | 產業 | 機率 | 實際報酬 | 超額 | 跳空 | 盤中 | 結果 |", "|---|---|---|---|---|---|---|---|---|---|"]
+    for c, r in weak.iterrows():
+        flag = " ⚠️前日跌停" if r.get("limitdown") else ""
+        res = "✅ 落後" if r.ret < med else "❌ 沒落後"
+        if r.ret >= 0.05:
+            res = "🔴 反而大漲"
+        L.append(f"| {int(r['weak_rank'])} | {c} | {r['name']}{flag} | {r['industry']} | {r['prob']:.1%} | {_p(r.ret)} | "
+                 f"{_p(r.excess)} | {_p(r.gap)} | {_p(r.intra)} | {res} |")
+    L.append("")
     return "\n".join(L) + "\n"
 
 

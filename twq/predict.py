@@ -7,7 +7,8 @@ import numpy as np
 import pandas as pd
 
 from . import db, features as F, model as M, weights as W
-from .config import PRED_DIR, PREDICT_REPORT_DIR, MODEL_DIR, TOP_N, DISCLAIMER, REPORT_DIR, PREDICT_SET, PREDICT_LABEL, LIMITUP_MODE
+from .config import (PRED_DIR, PREDICT_REPORT_DIR, MODEL_DIR, TOP_N, DISCLAIMER, REPORT_DIR, PREDICT_SET, PREDICT_LABEL,
+                     LIMITUP_MODE, PREOPEN_TOP_N, WEAK_N, LIMIT_MOVE)
 
 PCT_FEATS = {"r1", "r5", "r10", "r20", "r60", "ma5_ratio", "ma20_ratio", "ma60_ratio", "ma5_ma20", "vol20",
              "hl_range", "gap", "body", "upper_shadow", "dist_high20", "dist_high60", "dist_low20", "f_ratio",
@@ -128,7 +129,8 @@ def score(X, ds, target, booster, meta, top, limitup, mode="base"):
     c = booster.predict(Xp[feats], pred_contrib=True)
     contrib, base = pd.DataFrame(c[:, :-1], index=Xp.index, columns=feats), c[:, -1]
     Xp["prob"] = prob
-    Xp["limitup_flag"] = (Xp["r1"] >= 0.095)
+    Xp["limitup_flag"] = (Xp["r1"] >= LIMIT_MOVE)
+    Xp["limitdown_flag"] = (Xp["r1"] <= -LIMIT_MOVE)
     from . import weights as W
     w = W.load()
     if limitup == "exclude":
@@ -138,6 +140,14 @@ def score(X, ds, target, booster, meta, top, limitup, mode="base"):
     Xp = W.adjust(Xp, w, top, preopen=(mode == "preopen"))   # tunable post-model adjustments (config/weights.json)
     meta = {**meta, "weights_version": w.get("version"), "score_adjust": w["score"],
             "liquidity_min_avg_value": w.get("liquidity_min_avg_value")}
+    # 最弱 N 檔：用『原始模型機率』由低到高，套用和 Top 名單相同的流動性門檻（W.adjust 對未達門檻者扣 1.0 分，
+    # 那些股票會沉到排名最後面；最弱名單必須排除它們，否則會變成『最不流動』而不是『最不看好』）
+    liq = w.get("liquidity_min_avg_value") or 0
+    Xp["liquid_flag"] = (np.exp(Xp["log_value20"].fillna(0)) >= liq) if (liq and "log_value20" in Xp) else True
+    Xp["liquid_flag"] &= Xp["prob"].notna()
+    elig = Xp[Xp["liquid_flag"] & (Xp["rank"] > top)]
+    weak_rank = pd.Series(np.arange(1, min(WEAK_N, len(elig)) + 1),
+                          index=elig.sort_values("prob", ascending=True).index[:WEAK_N])
     con = db.connect()
     names = dict(con.execute("SELECT code,name FROM prices WHERE date=?", (ds,)).fetchall())
     con.close()
@@ -149,14 +159,16 @@ def score(X, ds, target, booster, meta, top, limitup, mode="base"):
             "code": code, "name": names.get(code, ""), "industry": r["industry"], "rank": int(r["rank"]),
             "prob": round(float(r["prob"]), 4), "close": float(r["close"]),
             "r1": None if pd.isna(r["r1"]) else float(r["r1"]),
-            "limitup": bool(r["limitup_flag"]),
+            "limitup": bool(r["limitup_flag"]), "limitdown": bool(r["limitdown_flag"]),
+            "liquid": bool(r["liquid_flag"]),
+            "weak_rank": int(weak_rank[(d, code)]) if (d, code) in weak_rank.index else None,
             "factors_pos": factor_list(c, r, 5, 1), "factors_neg": factor_list(c, r, 5, -1),
             "category_contrib": {k: round(float(v), 4) for k, v in grp.items()},
         })
     out = {
         "pred_date": ds, "target_date": target.isoformat() if target else None,
         "generated_at": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
-        "universe_size": len(rows), "top_n": top, "model": meta, "market": market_context(X, ds),
+        "universe_size": len(rows), "top_n": top, "weak_n": int(len(weak_rank)), "model": meta, "market": market_context(X, ds),
         "base_value": float(np.mean(base)), "disclaimer": DISCLAIMER, "mode": mode, "limitup_mode": limitup,
         "overnight": overnight_context(X, ds),
         "predictions": rows,
@@ -175,7 +187,7 @@ def overnight_context(X, ds):
 
 def run_preopen(target: dt.date = None, update=True, top=None, limitup=None):
     """Pre-open re-scoring for target day T using TAIFEX night session + US/Europe close + overnight events."""
-    top = top or TOP_N
+    top = top or PREOPEN_TOP_N
     limitup = limitup or LIMITUP_MODE
     from zoneinfo import ZoneInfo
     tdays = F.trading_days()
@@ -247,6 +259,7 @@ def _overnight_lines(on, pre):
     else:
         L.append("- 注意：預測後當晚的美股與台指期夜盤尚未反映；請看開盤前的「盤前更新預測」(twq preopen)。")
     L.append("- ⚠️漲停追高：前一日漲停的股票隔日常開高或買不到，歷史上是主要的誤判來源之一。")
+    L.append("- ⚠️前日跌停：最弱名單中前一日跌停的股票，隔日常開低或賣不掉（跌停鎖死），也可能出現跌深反彈。")
     return L
 
 
@@ -272,7 +285,7 @@ def render(o):
          f"- 櫃買指數：當日 {_pct(m['otc_r1'])}；上漲家數比例 {_pct(m['breadth'], False)}",
          f"- 前一晚美股：費半 {_pct(m['us_sox'])}、台積電ADR {_pct(m['us_tsm'])}、那斯達克 {_pct(m['us_ndx'])}、VIX {('%.1f' % m['us_vix']) if m['us_vix'] else 'NA'}",
          *(_overnight_lines(o.get("overnight") or {}, pre)), "",
-         f"## Top {o['top_n']} 看好名單", "",
+         f"## Top {o['top_n']} 看好名單（模型預測，非投資建議）", "",
          "| # | 代號 | 名稱 | 產業 | 跑贏機率 | 收盤 | 當日漲跌 | 主要看多因素 | 主要扣分因素 |",
          "|---|---|---|---|---|---|---|---|---|"]
     for r in top:
@@ -281,7 +294,8 @@ def render(o):
         flag = " ⚠️漲停追高" if r.get("limitup") else ""
         L.append(f"| {r['rank']} | {r['code']} | {r['name']}{flag} | {r['industry']} | {r['prob']:.1%} | {r['close']:g} | "
                  f"{_pct(r['r1'])} | {pos} | {neg} |")
-    L += ["", "## 各檔因素拆解（SHAP 貢獻，正值＝提高看多機率）", ""]
+    L += [""] + weak_lines(o)
+    L += ["## 看好名單各檔因素拆解（SHAP 貢獻，正值＝提高看多機率）", ""]
     for r in top:
         cats = "，".join(f"{k} {v:+.3f}" for k, v in list(r["category_contrib"].items())[:4])
         L.append(f"**{r['rank']}. {r['code']} {r['name']}**（{r['prob']:.1%}）— 類別貢獻：{cats}")
@@ -290,11 +304,6 @@ def render(o):
         for f in r["factors_neg"][:3]:
             L.append(f"  - － {f['label']}（{f['category']}）= {f['value_str']}，貢獻 {f['contrib']:+.3f}")
         L.append("")
-    bottom = o["predictions"][-5:]
-    L += ["## 最不看好 5 檔（供參考）", "", "| 代號 | 名稱 | 機率 | 主要看空因素 |", "|---|---|---|---|"]
-    for r in reversed(bottom):
-        neg = "；".join(f"{f['label']} {f['value_str']}" for f in r["factors_neg"][:3])
-        L.append(f"| {r['code']} | {r['name']} | {r['prob']:.1%} | {neg} |")
     vpath = REPORT_DIR / "validation.md"
     try:
         v = json.loads((MODEL_DIR / "validation.json").read_text())
@@ -305,3 +314,36 @@ def render(o):
     except Exception:
         pass
     return "\n".join(L) + "\n"
+
+
+def weak_list(o):
+    """最弱 N 檔（weak_rank 1 = 最弱）；舊格式 JSON 沒有 weak_rank 時回傳空 list。"""
+    w = [r for r in o["predictions"] if r.get("weak_rank")]
+    return sorted(w, key=lambda r: r["weak_rank"])
+
+
+def weak_lines(o):
+    w = weak_list(o)
+    pre = o.get("mode") == "preopen"
+    if not w:  # 舊格式：沿用最不看好 5 檔
+        L = ["## 最不看好 5 檔（供參考）", "", "| 代號 | 名稱 | 機率 | 主要看空因素 |", "|---|---|---|---|"]
+        for r in reversed(o["predictions"][-5:]):
+            neg = "；".join(f"{f['label']} {f['value_str']}" for f in r["factors_neg"][:3])
+            L.append(f"| {r['code']} | {r['name']} | {r['prob']:.1%} | {neg} |")
+        return L
+    nd = sum(1 for r in w if r.get("limitdown"))
+    L = [f"## 最弱 {len(w)} 檔（模型預測最可能落後，非投資建議）", "",
+         ("- 定義：" + ("目標日『開盤→收盤』" if pre else "隔日報酬") + "跑贏全體中位數的機率最低的股票（＝預期相對落後，"
+          "不代表一定下跌）；套用和 Top 名單相同的流動性門檻。"),
+         "- 放空/融券有額外成本、券源與平盤下限制；本名單只是模型排序結果，用來檢討模型是否也能分辨弱勢股。",
+         f"- 前一日跌停（⚠️前日跌停）：{nd} 檔" + ("（跌停鎖死時隔日常開低或賣不掉，也常見跌深反彈）" if nd else ""), "",
+         "| # | 代號 | 名稱 | 產業 | 跑贏機率 | 收盤 | 當日漲跌 | 主要看空因素 | 少數看多因素 |",
+         "|---|---|---|---|---|---|---|---|---|"]
+    for r in w:
+        neg = "；".join(f"{f['label']} {f['value_str']}" for f in r["factors_neg"][:3])
+        pos = "；".join(f"{f['label']} {f['value_str']}" for f in r["factors_pos"][:2])
+        flag = (" ⚠️前日跌停" if r.get("limitdown") else "") + (" ⚠️前日漲停" if r.get("limitup") else "")
+        L.append(f"| {r['weak_rank']} | {r['code']} | {r['name']}{flag} | {r['industry']} | {r['prob']:.1%} | {r['close']:g} | "
+                 f"{_pct(r['r1'])} | {neg} | {pos} |")
+    L.append("")
+    return L

@@ -16,3 +16,4 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{border-bottom:1px
 footer{text-align:center;color:var(--mut);font-size:13px;padding:20px}a{color:var(--acc)}
 .replist a{margin-right:10px;font-size:14px;cursor:pointer}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:800px){.grid2{grid-template-columns:1fr}}.scroll{overflow-x:auto}
+.warn-inline{border-left:3px solid var(--yel);padding:4px 10px;background:#2a2410;font-size:14px}
