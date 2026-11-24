@@ -40,6 +40,8 @@ def findings(days=20):
         out["n_days"] = len(recent)
         out["causes"] = w.causes.fillna("").str.split(";").explode().value_counts().to_dict()
         out["n_wrong"] = int(len(w))
+        # per-miss cause sets: a miss often has several causes, so shares must count misses, not cause tags
+        out["cause_sets"] = [set(x for x in str(v).split(";") if x) for v in w.causes.fillna("")]
     except Exception as e:
         out["notes"].append(f"review_log 無法讀取：{e}")
     try:
@@ -61,7 +63,11 @@ def candidates(w, f):
     """Small, bounded changes aimed at the detected problems. Returns [(key, new_value, reason_zh)]."""
     c = f["causes"]
     nw = max(f.get("n_wrong", 0), 1)
-    share = lambda *ks: sum(c.get(k, 0) for k in ks) / nw
+    sets = f.get("cause_sets")
+    if sets is not None:  # share of wrong picks having ANY of the causes (<= 100%)
+        share = lambda *ks: sum(1 for cs in sets if cs.intersection(ks)) / nw
+    else:
+        share = lambda *ks: min(sum(c.get(k, 0) for k in ks) / nw, 1.0)
     cands = []
 
     def bump(key, sign=1, reason=""):
